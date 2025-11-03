@@ -4,9 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>DIGITAL EXPERT — PHOTOS (Mobile)</title>
-<link rel="manifest" href="manifest.webmanifest">
 <script src="https://unpkg.com/heic2any/dist/heic2any.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#f6f7fb;--card:#fff;--ink:#0f172a;--muted:#6b7280;--line:#e5e7eb;--shadow:0 12px 28px rgba(2,6,23,.10);--pill:#0f172a;--pillText:#fff}
 *{box-sizing:border-box}
@@ -41,16 +39,26 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 /* Inputs */
 .input{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px}
 .btn{appearance:none;border:1px solid var(--line);background:#fff;color:#0f172a;padding:12px;border-radius:14px;font-weight:900}
-.badge{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid var(--line);font-weight:800;background:#fff}
-.badge.on{background:#0f172a;border-color:#0f172a;color:#fff}
+.btn.blk{background:#111;color:#fff;border-color:#111}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:#fff}
+.rolegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.rolebtn{background:#fff;color:#111;border:1px solid #111;padding:18px;border-radius:18px;font-weight:900}
+.rolebtn.active{background:#111;color:#fff;border-color:#111}
 
-/* Pages */
-.page{display:none}
-.page.active{display:block}
+/* Dropdown */
+.dropdown{position:relative}
+.menu{position:absolute;left:0;right:0;top:100%;z-index:20;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px;display:none;max-height:240px;overflow:auto}
+.menu.show{display:block}
+.option{padding:8px 10px;border-radius:10px}
+.option:hover{background:#f3f4f6}
 
-/* Checklist + gallery items */
-.item{border:1px solid var(--line);border-radius:12px;padding:10px;margin:6px 0;background:#fff}
-.item.photo{border-left:4px solid #0ea5e9}
+/* Modal */
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999}
+.panel{background:#fff;border-radius:18px;box-shadow:var(--shadow);max-width:520px;width:100%;padding:16px}
+
+/* Gallery */
+.item{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px}
+.item.photo{border-left:4px solid #3b82f6}
 .item.video{border-left:4px solid #f59e0b}
 .item.file{border-left:4px solid #8b5cf6}
 .item.uploaded{border-left-color:#10b981}
@@ -81,47 +89,161 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 .badge.toggle{display:inline-block;padding:6px 10px;border:1px solid #ddd;border-radius:12px;cursor:pointer;font-weight:700}
 .badge.toggle.active{background:#111;color:#fff;border-color:#111}
 </style>
+
+<script>
+/* Polyfill: Promise.finally για παλιότερα webviews/browsers */
+if (!Promise.prototype.finally) {
+  Promise.prototype.finally = function (callback) {
+    var P = this.constructor;
+    return this.then(
+      function (value) { return P.resolve(callback()).then(function(){ return value; }); },
+      function (reason){ return P.resolve(callback()).then(function(){ throw reason; }); }
+    );
+  };
+}
+</script>
+
+<script src="https://unpkg.com/piexifjs"></script>
+
+<!-- v6.21: JSZip + PWA manifest -->
+<link rel="manifest" href="manifest.webmanifest">
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  });
+}
+</script>
+
+
+<script>
+// v6.22 — Lazy loader for ffmpeg.wasm
+window.__ffmpegLoader = (function(){
+  let loading = null;
+  return async function ensureFFmpeg(){
+    if (window.FFmpeg) return true;
+    if (loading) return loading;
+    loading = new Promise(async (res, rej)=>{
+      try{
+        const s = document.createElement('script');
+        s.src = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js";
+        s.onload = ()=>res(true);
+        s.onerror = ()=>rej(new Error('ffmpeg.wasm load error'));
+        document.head.appendChild(s);
+      }catch(e){ rej(e); }
+    });
+    return loading;
+  };
+})();
+</script>
+
 </head>
+
 <body>
-<header class="header">
+
+<!-- Sticky header -->
+<div class="header">
   <div class="in">
     <div class="logoWrap">
-      <div class="appLogo"><img src="https://i.imgur.com/4ZQRP5F.png" alt=""></div>
-      <div class="appTitle">DIGITAL EXPERT — PHOTOS (Mobile)</div>
-      <div class="appSub">Συλλογή, έλεγχος και αποστολή υλικού</div>
+      <div class="appLogo">
+        <img id="logoImg" src="logo.png" alt="Logo"
+             onerror="this.remove();document.getElementById('logoFallback').style.display='block'">
+        <svg id="logoFallback" viewBox="0 0 120 120" style="display:none;width:100%;height:100%">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#0ea5e9"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+          <rect rx="18" ry="18" width="120" height="120" fill="#0b1324"/>
+          <circle cx="60" cy="60" r="34" fill="url(#g)"/><path d="M60 28 L74 90 L46 90 Z" fill="#0b1324"/>
+          <circle cx="60" cy="24" r="6" fill="#22d3ee"/>
+        </svg>
+      </div>
+      <div class="appTitle">DIGITAL EXPERT — PHOTOS</div>
+      <div class="appSub">Your Technology Partner</div>
     </div>
     <div class="tabs">
-      <a class="tab active" href="#/sr">SR & Ρόλος</a>
-      <a class="tab" href="#/gallery">Συλλογή</a>
-    </div>
+      <a href="#/sr" class="tab" data-route="#/sr">📁 SR & Ρόλος</a>
+      <a href="#/structure" class="tab" data-route="#/structure">🏢 Δομή κτιρίου</a>
+      <a href="#/shoot" class="tab" data-route="#/shoot">📷 Φωτογράφιση</a>
+      <a href="#/gallery" class="tab" data-route="#/gallery">🖼️ Συλλογή & Upload</a>
+    
+</div>
   </div>
-</header>
+</div>
 
 <div class="wrap">
   <!-- SR -->
-  <section id="page-sr" class="page active" data-page="#/sr">
+  <section id="page-sr" data-page="#/sr">
     <div class="card">
-      <div class="title">🏷️ SR & Ρόλος</div>
+      <div class="title">📁 SR επιλογή</div>
+      <div class="muted" style="margin-top:4px">Αναζήτηση στο Drive ή χειροκίνητα (κεφαλαία χωρίς τόνους)</div>
       <div class="row" style="margin-top:10px">
-        <input id="inSR" class="input" placeholder="SRID π.χ. 2-1234567890">
-        <input id="inAddress" class="input" placeholder="Διεύθυνση (προαιρετικό)">
+        <div class="dropdown" style="flex:1">
+          <input id="srSearch" class="input" placeholder="ΑΝΑΖΗΤΗΣΗ (ΔΙΕΥΘΥΝΣΗ ή SR)">
+          <div id="srMenu" class="menu"></div>
+        </div>
+        <button id="btnSrSearch" class="btn">Search</button>
       </div>
       <div class="row" style="margin-top:10px">
-        <button id="btnSRApply" class="btn">Ορισμός</button>
-        <button id="btnSrSearch" class="btn">Αναζήτηση SR</button>
-        <div id="srInfo" class="muted">—</div>
+        <input id="inAddress" class="input" placeholder="ΔΙΕΥΘΥΝΣΗ (Π.Χ. ΤΑΙΝΑΡΟΥ 41)" style="flex:1">
+        <input id="inSR" class="input" placeholder="SR (Π.Χ. 2-3290…)" style="width:180px">
+        <button id="btnSRApply" class="btn blk">Ορισμός</button>
       </div>
-      <div id="srMenu" class="row" style="margin-top:6px"></div>
-
-      <div class="row" style="margin-top:10px;gap:6px">
-        <button class="badge on" data-role="ΚΑΤΑΣΚΕΥΑΣΤΗΣ">Κατασκευαστής</button>
-        <button class="badge" data-role="ΧΩΜΑΤΟΥΡΓΟΣ">Χωματουργός</button>
-        <button class="badge" data-role="ΗΛΕΚΤΡΟΛΟΓΟΣ">Ηλεκτρολόγος</button>
-        <button class="badge" data-role="ΑΥΤΟΨΙΑ">Αυτοψία</button>
-      </div>
-      <div id="roleInfo" class="muted" style="margin-top:6px">—</div>
+      <div id="srInfo" class="muted" style="margin-top:6px">—</div>
     </div>
 
+    <div class="card">
+      <div class="title">👷 Επιλέξτε ρόλο</div>
+      <div class="rolegrid" style="margin-top:10px">
+        <button class="rolebtn" data-role="XM">🛠️ Χωματουργός</button>
+        <button class="rolebtn" data-role="KS">📦 Κατασκευαστής</button>
+        <button class="rolebtn" data-role="KL">🧵 Κολλητής</button>
+        <button class="rolebtn" data-role="AP">📝 Αυτοψία</button>
+      </div>
+      <div id="roleInfo" class="muted" style="margin-top:6px">—</div>
+<div class="row" style="margin-top:10px;gap:8px;align-items:center">
+  <label class="muted">Τεχνικός</label>
+  <select id="techSelect" class="input" style="flex:1;max-width:260px" disabled>
+    <option value="">— Επίλεξε τεχνικό —</option>
+    <option value="__OTHER__">— Άλλος (γράψε όνομα) —</option>
+  </select>
+</div>
+<div class="row" style="gap:8px;align-items:center;margin-top:6px">
+  <input id="techCustom" class="input" placeholder="Πληκτρολόγησε όνομα" style="flex:1;display:none">
+  <button id="techSave" class="btn" style="display:none">Αποθήκευση</button>
+  <div id="techInfo" class="muted" style="margin-left:auto">—</div>
+</div>
+
+    </div>
+  </section>
+
+  <!-- Structure -->
+  <section id="page-structure" data-page="#/structure" class="hidden">
+    <div class="card">
+      <div class="title">🏢 Δομή κτιρίου</div>
+<div class="row" style="margin-top:8px"><span id="bepOnlyBtn" class="badge toggle" title="Εμφάνιση μόνο BEP/BMO, BCP, Smart Points">BEP ONLY</span></div>
+      <div class="muted">Επίλεξε ορόφους — θα ζητηθούν FB/όροφο και Όδευση/όροφο</div>
+      <div class="grid4" id="floorsGrid" style="margin-top:10px"></div>
+      <div id="floorDetails" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card" id="smartCard">
+      <div class="title">⚡ Smart Readiness</div>
+      <div class="row" style="margin-top:8px">
+        <div id="srYes" class="badge">ΝΑΙ</div>
+        <div id="srNo" class="badge">ΟΧΙ</div>
+      </div>
+      <div id="srModules" class="row" style="margin-top:10px; display:none">
+        <label class="badge on"><input type="checkbox" data-sp="MHE" checked> ΜΗΕ</label>
+        <label class="badge"><input type="checkbox" data-sp="FY"> ΦΥ</label>
+        <label class="badge"><input type="checkbox" data-sp="KTH"> ΚΘ</label>
+        <label class="badge"><input type="checkbox" data-sp="MA"> ΜΑ</label>
+      </div>
+      <div id="smartInfo" class="muted" style="margin-top:6px">—</div>
+    </div>
+  </section>
+
+  <!-- Shoot -->
+  <section id="page-shoot" data-page="#/shoot" class="hidden">
     <div class="card">
       <div class="title">📦 Modules</div>
       <div class="muted">Δείχνει μόνο τα βήματα του κάθε module</div>
@@ -137,7 +259,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
   </section>
 
   <!-- Gallery -->
-  <section id="page-gallery" class="page" data-page="#/gallery">
+  <section id="page-gallery" data-page="#/gallery" class="hidden">
     <div class="card">
       <div class="title">🖼️ Συλλογή <span id="itemCount" class="badge" style="margin-left:8px">0</span></div>
 
@@ -153,7 +275,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 
       <div id="gallery" style="margin-top:12px"></div>
 
-      <div id="galleryEmpty" class="muted" style="text-align:center;padding:20px">
+      <div id="galleryEmpty" class="muted" style="text-align:center; padding:20px">
         <div style="font-size:48px">📸</div>
         <div style="margin-top:8px">Δεν υπάρχουν αρχεία ακόμα</div>
         <div style="font-size:12px; margin-top:4px">Πήγαινε στην καρτέλα «Φωτογράφιση» για να προσθέσεις φωτογραφίες</div>
@@ -161,7 +283,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 
       <div id="uploadStatus" class="upload-status" style="display:none">
         <div class="status-row">
-          <span id="statusText">Ανέβασμα σε εξέλιξη.</span>
+          <span id="statusText">Ανέβασμα σε εξέλιξη...</span>
           <span id="statusPercent" style="font-weight:600">0%</span>
         </div>
         <div class="progress" style="margin-top:6px"><span id="statusProgress"></span></div>
@@ -174,8 +296,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 
       <div id="uploadInfo" class="muted" style="margin-top:8px; font-size:12px">—</div>
     </div>
+  </section>
+</div>
 
-    <!-- Sync -->
+
+  <!-- Sync -->
+  <section id="page-sync" data-page="#/sync" class="hidden">
     <div class="card">
       <div class="title">🔄 Συγχρονισμός</div>
       <div class="muted">Δείχνει τι έχει ήδη ανέβει για το τρέχον SR</div>
@@ -185,25 +311,16 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
       </div>
       <div id="syncList" style="margin-top:10px"></div>
     </div>
-
-    <!-- Tools -->
-    <div class="card">
-      <div class="title">🧰 Εργαλεία</div>
-      <div class="row" style="margin-top:10px;gap:8px">
-        <button id="btnDownloadZip" class="btn">📥 Κατέβασε όλες (ZIP)</button>
-      </div>
-      <div class="muted" style="margin-top:6px">Κατεβάζει ΟΛΑ τα τοπικά items (pending / uploaded / error), όπως είναι στη συσκευή.</div>
-    </div>
   </section>
-</div>
+
 
 <!-- Bottom navigation -->
 <div class="bottomBar">
   <div class="in">
-    <a class="btn" href="#/sr">🏠 Αρχική</a>
-    <a class="btn" href="#/gallery">🖼️ Συλλογή</a>
-    <a class="btn" href="#/gallery">🔄 Συγχρονισμός</a>
-    <button id="btnOpenSettings" class="btn">⚙️ Ρυθμίσεις</button>
+<a class="btn" href="#/sr">🏠 Αρχική</a>
+<a class="btn" href="#/structure">🏢 Δομή</a>
+<a class="btn" href="#/gallery">🖼️ Συλλογή</a>
+<a class="btn" href="#/sync">🔄 Συγχρονισμός</a>
   </div>
 </div>
 
@@ -211,8 +328,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 <div id="fatal">⚠️ Σφάλμα εφαρμογής: <span id="fatalMsg"></span></div>
 
 <!-- Modal -->
-<div id="modal" class="modal" aria-modal="true" role="dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);align-items:center;justify-content:center">
-  <div id="modalPanel" class="panel" style="background:#fff;border-radius:14px;padding:14px;max-width:640px;width:92%">
+<div id="modal" class="modal" aria-modal="true" role="dialog">
+  <div id="modalPanel" class="panel">
     <div class="row" style="justify-content:space-between;align-items:flex-start">
       <div style="flex:1">
         <div class="muted">Βήμα</div>
@@ -223,129 +340,456 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
       <button id="btnClose" class="btn">✕</button>
     </div>
 
-    <div style="height:1px;background:#e5e7eb;margin:10px 0"></div>
+    <div style="height:1px;background:#e5e7eb;margin:12px 0"></div>
 
-    <div class="grid3">
-      <input id="fileCam" type="file" accept="image/*" capture="environment" style="display:none">
-      <input id="fileVid" type="file" accept="video/*" capture="environment" style="display:none">
-      <input id="fileGal" type="file" accept="image/*,video/*,application/pdf,.iolm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple style="display:none">
-      <button class="btn" id="btnAgain">📷 Κάμερα</button>
-      <button class="btn" onclick="document.getElementById('fileVid').click()">🎥 Βίντεο</button>
-      <button class="btn" onclick="document.getElementById('fileGal').click()">📁 Από αρχείο</button>
+    <div class="grid2" style="gap:8px">
+      <div>
+        <div class="muted" style="font-size:11px;margin-bottom:4px">📸 Άμεση λήψη</div>
+        <input id="fileCam" type="file" accept="image/*" capture="environment" style="display:none">
+        <label for="fileCam" class="btn blk" style="width:100%;text-align:center;display:block">Κάμερα</label>
+      </div>
+
+      <div>
+        <div class="muted" style="font-size:11px;margin-bottom:4px">🖼️ Από αρχεία</div>
+        <input id="fileGal" type="file" accept="image/*,video/*,application/pdf,.iolm" multiple style="display:none">
+        <label for="fileGal" class="btn" style="width:100%;text-align:center;display:block">Συλλογή</label>
+      </div>
     </div>
 
-    <div class="row" style="margin-top:10px;justify-content:flex-end">
-      <button id="btnNext" class="btn">Επόμενο</button>
+    <input id="fileVid" type="file" accept="video/*" capture="environment" style="display:none">
+    <label for="fileVid" id="btnVid" class="btn" style="width:100%;margin-top:8px;display:block;text-align:center">🎥 Βίντεο</label>
+
+    <div class="grid2" style="margin-top:12px;gap:8px">
+      <button id="btnAgain" class="btn">🔄 Άλλη λήψη</button>
+      <button id="btnNext" class="btn blk">Επόμενο βήμα →</button>
     </div>
+
+    <div id="fileWarning" class="badge" style="display:none;margin-top:10px;background:#fef3c7;border-color:#f59e0b;color:#92400e">⚠️ Προτιμήστε «Αρχεία» αντί για «Φωτογραφίες» για cloud αρχεία.</div>
   </div>
 </div>
 
-<!-- Settings (placeholder) -->
-<div id="de-settings-modal" style="position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center">
-  <div id="de-settings-card">
-    <h3>Ρυθμίσεις</h3>
-    <div class="row">
-      <label>WEBAPP_URL
-        <input id="webappUrlInput" class="input" placeholder="https://script.google.com/macros/s/XXXXX/exec">
-      </label>
-      <label>Τεχνικός
-        <input id="techNameInput" class="input" placeholder="Όνομα τεχνικού">
-      </label>
+<!-- Autopsy panel -->
+<div class="card" id="autopsyPanel" style="display:none">
+  <div class="title">📝 Στοιχεία Αυτοψίας</div>
+  
+  <div class="row">
+    <label>Χωματουργικό:</label>
+    <select id="ax_homa"><option>ΟΧΙ</option><option>ΝΑΙ</option></select>
+    <span id="ax_homa_lvl_wrap" style="display:none;margin-left:8px">
+      <label>Βαθμός δυσκολίας:</label>
+      <select id="ax_homa_lvl"><option>ΒΔ1</option><option>ΒΔ2</option><option>ΒΔ3</option><option>ΒΔ4</option><option>ΒΔ5</option></select>
+    </span>
+  </div>
+
+  <div class="row" style="margin-top:6px">
+    <label>Smart Readiness:</label>
+    <div id="smartToggle" style="display:flex;gap:8px">
+      <span class="badge toggle" data-value="ΝΑΙ">ΝΑΙ</span>
+      <span class="badge toggle active" data-value="ΟΧΙ">ΟΧΙ</span>
     </div>
-    <div id="de-settings-actions">
-      <button class="save" id="btnSaveSettings">Αποθήκευση</button>
-      <button id="btnCloseSettings">Κλείσιμο</button>
+  </div>
+
+  <div id="smartPointsWrap" style="margin-top:6px;display:none">
+    <label>Smart Points:</label>
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <label class="badge"><input type="checkbox" data-sp="MHE" checked> ΜΗΕ</label>
+      <label class="badge"><input type="checkbox" data-sp="FY"> ΦΥ</label>
+      <label class="badge"><input type="checkbox" data-sp="KTH"> ΚΘ</label>
+      <label class="badge"><input type="checkbox" data-sp="MA"> ΜΑ</label>
     </div>
+  </div>
+
+  <div class="row" style="margin-top:6px">
+    <label>Τύπος Όδευσης:</label>
+    <select id="ax_route_type"><option>Κάγκελο</option><option>Περιμετρική</option><option>Εξωτερική</option></select>
+  </div>
+
+  <div class="row" style="margin-top:6px">
+    <label>ΒΔ Κατασκευαστικού:</label>
+    <select id="ax_katas_lvl"><option>ΒΔ1</option><option>ΒΔ2</option><option>ΒΔ3</option><option>ΒΔ4</option><option>ΒΔ5</option></select>
+  </div>
+
+  <div class="row" style="margin-top:6px">
+    <label>Όροφος Τοποθέτησης BEP:</label>
+    <select id="ax_bep_floor"><option>F-02</option><option>F-01</option><option selected>F+00</option><option>F+01</option><option>F+02</option><option>F+03</option><option>F+04</option><option>F+05</option><option>F+06</option><option>F+07</option><option>F+08</option><option>F+09</option></select>
+  </div>
+
+  <div class="row" style="margin-top:6px">
+    <label>Επίπεδα κτιρίου:</label>
+    <select id="ax_levels"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option></select>
+  </div>
+
+  <div class="row" style="margin-top:6px">
+    <label>Status:</label>
+    <select id="ax_status">
+      <option>ΕΚΚΡΕΜΕΙ ΥΠΟΓΡΑΦΗ</option>
+      <option>ΟΛΟΚΛΗΡΩΣΗ</option>
+      <option>ΑΚΥΡΩΣΗ</option>
+      <option>ΓΙΑ ΜΗΧΑΝΙΚΟ</option>
+      <option>ΕΠΑΝΑΠΡΟΓΡΑΜΜΑΤΙΣΜΟΣ</option>
+    </select>
+  </div>
+
+  <div class="row" style="margin-top:8px">
+    <button id="ax_sync_sheet" class="btn">Αποστολή στο Sheet</button>
+    <span id="ax_sync_result" class="badge-info">—</span>
   </div>
 </div>
 
 <script>
-/* ---------- CONFIG (editable) ---------- */
-let WEBAPP_URL = localStorage.getItem('WEBAPP_URL') || ''; // βάλτο και από Ρυθμίσεις
-const IS_LOCAL_ORIGIN = location.protocol==='file:';
+/* Fatal js */
+window.addEventListener('error', e=>{
+  const b=document.getElementById('fatal'), m=document.getElementById('fatalMsg');
+  if(b&&m){ m.textContent=(e.error&&e.error.message)||e.message||String(e); b.style.display='block'; }
+});
+
+/* MAIN */
+window.addEventListener('DOMContentLoaded', function(){
+(function(){
+
+/* ---------- CONFIG ---------- */
+const WEBAPP_URL='https://script.google.com/macros/s/AKfycbx_pJ-CByq6aFZ2d9v12OglYA51FSI8gTPSRtFIPQgMxJOgJvWNcxJanllsT9wO1tZN/exec';
+const IS_LOCAL_ORIGIN=(location.origin==='null')||location.protocol.startsWith('file')||location.protocol.startsWith('content');
+
+/* ---------- ROUTER ---------- */
+const pages=[...document.querySelectorAll('[data-page]')];
+const tabs=[...document.querySelectorAll('.tab')];
+function go(route){
+  pages.forEach(p=>p.classList.toggle('hidden',p.dataset.page!==route));
+  tabs.forEach(t=>t.classList.toggle('active',t.getAttribute('data-route')===route));
+  if(location.hash!==route) location.hash=route;
+  scrollTo({top:0,behavior:'smooth'});
+}
+tabs.forEach(t=>t.addEventListener('click',e=>{e.preventDefault();go(t.getAttribute('data-route'))}));
+window.addEventListener('hashchange',()=>go(location.hash||'#/sr'));
+go(location.hash||'#/sr');
 
 /* ---------- STATE ---------- */
-const state = {
-  job: null,
-  items: [], // {type:'photo'|'video'|'file', name, file, thumb:ObjectURL, stepId, status:'pending'|'uploaded'|'error', destinations:[]}
-  filter: 'all',
-  checklist: [],
-  currentIndex: 0,
-  greekRole: 'ΚΑΤΑΣΚΕΥΑΣΤΗΣ',
-  techName: localStorage.getItem('TECH_NAME') || '',
-  geo: null
-};
-
-/* ---------- UTILS ---------- */
-function nowStamp(){
-  const d=new Date();
-  const pad=n=>String(n).padStart(2,'0');
-  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+const state={role:null,job:null,module:null,items:[],checklist:[],currentIndex:0,
+floors:[],fbPerFloor:{},routePerFloor:{},smartReady:false,sp:{MHE:true,FY:false,KTH:false,MA:false},filter:'all'};
+/* --- TECH/ROLE, GPS, EXIF helpers (compat) --- */
+const ROLE_GREEK_MAP={XM:'ΧΩΜΑΤΟΥΡΓΟΣ',KS:'ΚΑΤΑΣΚΕΥΑΣΤΗΣ',KL:'ΚΟΛΛΗΤΗΣ',AP:'ΑΥΤΟΨΙΕΣ'};
+state.greekRole=state.greekRole||''; state.techName=state.techName||''; state.geo=state.geo||null;
+var techSelect=document.getElementById('techSelect');
+var techCustom=document.getElementById('techCustom');
+var techSave=document.getElementById('techSave');
+var techInfo=document.getElementById('techInfo');
+function updateTechInfo(){ var s=state.greekRole?('Ρόλος: '+state.greekRole):'—'; if(state.techName) s+=' — '+state.techName; if(techInfo) techInfo.textContent=s; }
+function loadTechsForRole(roleGreek){
+  if(!techSelect) return Promise.resolve();
+  techSelect.innerHTML='<option value="">— Επίλεξε τεχνικό —</option><option value="__OTHER__">— Άλλος (γράψε όνομα) —</option>';
+  techSelect.disabled=true;
+  return fetch(WEBAPP_URL+'?action=techs&role='+encodeURIComponent(roleGreek||''))
+    .then(function(res){ return res.json(); })
+    .then(function(data){
+      (data.techs||[]).forEach(function(t){ var o=document.createElement('option'); o.value=t.name; o.textContent=t.name; techSelect.appendChild(o); });
+      techSelect.disabled=false;
+    })
+    .then(null, function(e){ techSelect.innerHTML='<option value="">Σφάλμα φόρτωσης</option>'; });
 }
-function humanSize(bytes){
-  const b=Number(bytes||0);
-  if(b<1024) return b+' B';
-  if(b<1024*1024) return (b/1024).toFixed(1)+' KB';
-  return (b/1024/1024).toFixed(1)+' MB';
-}
-function isHeic(file){ return /\.(heic)$/i.test(file.name||''); }
+if(techSelect){ techSelect.addEventListener('change', function(){ var v=techSelect.value; if(v==='__OTHER__'){ techCustom.style.display='block'; techSave.style.display='inline-block'; state.techName=''; } else { techCustom.style.display='none'; techSave.style.display='none'; state.techName=v||''; try{ if(v) localStorage.setItem('defTechName', v);} catch(e){} } updateTechInfo(); }); }
+if(techSave){ techSave.addEventListener('click', function(){ var name=(techCustom.value||'').trim(); if(!name){ alert('Γράψε όνομα'); return; } fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'addTech',name:name,role:state.greekRole||''})}).then(function(){ }).then(null, function(e){ }).then(function(){ state.techName=name; try{ localStorage.setItem('defTechName', name);} catch(e){} updateTechInfo(); techCustom.style.display='none'; techSave.style.display='none'; loadTechsForRole(state.greekRole).then(function(){ if(techSelect) techSelect.value=name; }); }); }); }
+// defaults on load
+(function(){ try{ var savedRole=localStorage.getItem('defRoleCode'); var savedTech=localStorage.getItem('defTechName'); if(savedRole){ state.greekRole=ROLE_GREEK_MAP[savedRole]||''; loadTechsForRole(state.greekRole).then(function(){ if(savedTech){ state.techName=savedTech; if(techSelect) techSelect.value=savedTech; updateTechInfo(); } }); } } catch(e){} })();
+// GPS once
+function getGeoOnce(){ if(state.geo) return Promise.resolve(state.geo); return new Promise(function(resolve){ if(!('geolocation' in navigator)) return resolve(null); var opts={enableHighAccuracy:true,timeout:6000,maximumAge:0}; navigator.geolocation.getCurrentPosition(function(pos){ state.geo={lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:pos.coords.accuracy}; resolve(state.geo); }, function(){ resolve(null); }, opts); }); }
+// EXIF inject
+function injectExifOnJpegBase64(jpegDataUrl, geo, techName){ try{ if(!jpegDataUrl||jpegDataUrl.indexOf('data:image/jpeg')!==0||typeof piexif==='undefined') return jpegDataUrl; var exifObj={'0th':{},'Exif':{},'GPS':{},'1st':{},'thumbnail':null}; if(techName){ exifObj['0th'][piexif.ImageIFD.Artist]=techName; var ucs2=[]; for(var i=0;i<techName.length;i++){ var ch=techName.charCodeAt(i); ucs2.push(ch & 0xFF, ch >> 8); } ucs2.push(0,0); exifObj['0th'][piexif.ImageIFD.XPAuthor]=ucs2; exifObj['Exif'][piexif.ExifIFD.UserComment]='ASCII\0\0\0TECH='+techName; } if(geo && typeof geo.lat==='number' && typeof geo.lng==='number'){ function toRat(val){ var v=Math.abs(val),deg=Math.floor(v),minFloat=(v-deg)*60,min=Math.floor(minFloat),sec=Math.round((minFloat-min)*6000); return [[deg,1],[min,1],[sec,100]]; } exifObj['GPS'][piexif.GPSIFD.GPSLatitudeRef]=(geo.lat>=0)?'N':'S'; exifObj['GPS'][piexif.GPSIFD.GPSLatitude]=toRat(geo.lat); exifObj['GPS'][piexif.GPSIFD.GPSLongitudeRef]=(geo.lng>=0)?'E':'W'; exifObj['GPS'][piexif.GPSIFD.GPSLongitude]=toRat(geo.lng); } var exifBytes=piexif.dump(exifObj); return piexif.insert(exifBytes, jpegDataUrl); } catch(e){ return jpegDataUrl; } }
 
-/* ---------- ROLE ---------- */
-document.querySelectorAll('[data-role]').forEach(b=>b.onclick=()=>setRole(b.dataset.role));
+
+/* ---------- ELEMENTS ---------- */
 const roleInfo=document.getElementById('roleInfo');
-function setRole(r){ state.greekRole=r; roleInfo.textContent='Ρόλος: '+r; }
-
-/* ---------- SR ---------- */
+document.querySelectorAll('[data-role]').forEach(b=>b.onclick=()=>setRole(b.dataset.role));
+const srSearch=document.getElementById('srSearch'), srMenu=document.getElementById('srMenu'), btnSrSearch=document.getElementById('btnSrSearch');
 const inAddress=document.getElementById('inAddress'), inSR=document.getElementById('inSR'), btnSRApply=document.getElementById('btnSRApply'), srInfo=document.getElementById('srInfo');
-btnSRApply.onclick=()=>{
-  const v=inSR.value.trim();
-  if(!v){ alert('Δώσε SR'); return; }
-  state.job={ srFolderName:v, address:inAddress.value.trim()||'' };
-  srInfo.textContent='SR: '+v+(state.job.address?' — '+state.job.address:'');
-  location.hash='#/gallery';
-  refreshUploadedIndex();
-  refreshSync();
-};
-
-/* ---------- NAV ---------- */
-function go(hash){ location.hash=hash; }
-window.addEventListener('hashchange',syncTabs);
-function syncTabs(){
-  const h=location.hash||'#/sr';
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.getAttribute('href')===h));
-  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.dataset.page===h));
-}
-syncTabs();
-
-/* ---------- CHECKLIST (placeholder minimal) ---------- */
-const checklistEl=document.getElementById('checklist');
-const modulesRow=document.getElementById('modulesRow'), moduleInfo=document.getElementById('moduleInfo');
-state.checklist=[
-  {id:'AP_BEP_BEFORE', label:'BEP — Πριν', type:'photo'},
-  {id:'AP_BEP_AFTER',  label:'BEP — Μετά', type:'photo'},
-  {id:'AP_FSS',        label:'FSS', type:'file'},
-  {id:'AP_DESC',       label:'Περιγραφικό Βίντεο', type:'video'}
-];
-function renderChecklist(){
-  checklistEl.innerHTML='';
-  state.checklist.forEach((s,i)=>{
-    const row=document.createElement('div'); row.className='item';
-    row.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center">
-      <div style="font-weight:900">${s.label}</div>
-      <button class="btn">Άνοιγμα</button>
-    </div>`;
-    row.querySelector('button').onclick=()=>openModalAt(i);
-    checklistEl.appendChild(row);
-  });
-}
-renderChecklist();
-
-/* ---------- MODAL ---------- */
+const floorsGrid=document.getElementById('floorsGrid'), floorDetails=document.getElementById('floorDetails');
+const srYes=document.getElementById('srYes'), srNo=document.getElementById('srNo'), srModules=document.getElementById('srModules'), smartInfo=document.getElementById('smartInfo');
+const modulesRow=document.getElementById('modulesRow'), moduleInfo=document.getElementById('moduleInfo'), checklistEl=document.getElementById('checklist');
+const galleryEl=document.getElementById('gallery'), galleryEmpty=document.getElementById('galleryEmpty');
+const btnUploadAll=document.getElementById('btnUploadAll'), btnClear=document.getElementById('btnClear'), uploadInfo=document.getElementById('uploadInfo');
 const modal=document.getElementById('modal'), modalPanel=document.getElementById('modalPanel');
 const modalStepLabel=document.getElementById('modalStepLabel'), modalStepId=document.getElementById('modalStepId'), modalStepInfo=document.getElementById('modalStepInfo');
 const btnClose=document.getElementById('btnClose'), btnNext=document.getElementById('btnNext'), btnAgain=document.getElementById('btnAgain');
 const fileCam=document.getElementById('fileCam'), fileGal=document.getElementById('fileGal'), fileVid=document.getElementById('fileVid');
+const itemCount=document.getElementById('itemCount'), uploadCount=document.getElementById('uploadCount');
+const uploadStatus=document.getElementById('uploadStatus'), statusText=document.getElementById('statusText'), statusPercent=document.getElementById('statusPercent'), statusProgress=document.getElementById('statusProgress');
 
+/* ---------- HELPERS ---------- */
+function upperNoTonos(s){try{return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ς/g,'σ').toUpperCase()} catch(e){return (s||'').toUpperCase()}}
+[srSearch,inAddress,inSR].forEach(inp=>inp.addEventListener('input',()=>{const p=inp.selectionStart;inp.value=upperNoTonos(inp.value);try{inp.setSelectionRange(p,p)} catch(e){}}));
+
+/* ---------- SEARCH ---------- */
+let tSearch=null;
+srSearch.addEventListener('input',()=>{clearTimeout(tSearch);tSearch=setTimeout(runSrSearch,400);});
+btnSrSearch.addEventListener('click',runSrSearch);
+document.addEventListener('click',e=>{if(!srMenu.contains(e.target)&&e.target!==srSearch){srMenu.classList.remove('show')}});
+
+async function runSrSearch(){
+  const q=srSearch.value.trim(); srMenu.innerHTML=''; srMenu.classList.remove('show'); if(!q) return;
+  try{
+    const res=await fetch(WEBAPP_URL+'?action=search&query='+encodeURIComponent(q)+'&t='+Date.now());
+    const json=await res.json(); if(!json.ok) throw new Error(json.error||'search failed');
+    const qn=upperNoTonos(q); let rows=json.results.filter(r=>upperNoTonos(r.name).includes(qn));
+    if(!rows.length){srMenu.innerHTML='<div class="option muted">Δεν βρέθηκαν</div>';srMenu.classList.add('show');return;}
+    rows.slice(0,60).forEach(r=>{
+      const el=document.createElement('div'); el.className='option'; el.textContent=r.name;
+      el.onclick=()=>{const parts=r.name.split(' ');const srGuess=parts[parts.length-1]||r.name;
+        state.job={sr:srGuess,building:'BXXXX',address:r.name.replace(srGuess,'').trim()||'-',srFolderName:r.name};
+        srInfo.textContent='Επιλέχθηκε: '+r.name; srMenu.classList.remove('show'); srSearch.value=r.name;};
+      srMenu.appendChild(el);
+    }); srMenu.classList.add('show');
+  } catch(err){
+    srMenu.innerHTML='<div class="option muted">Σφάλμα αναζήτησης: '+((err&&err.message)||'άγνωστο')+'</div>'; srMenu.classList.add('show');
+  }
+}
+btnSRApply.onclick=()=>{const addr=inAddress.value.trim(), sr=inSR.value.trim(); if(!sr){alert('Γράψε SR');return;}
+  const name=(addr?addr+' ':'')+sr; state.job={sr:sr,building:'BXXXX',address:addr||'-',srFolderName:name}; srInfo.textContent='Επιλέχθηκε: '+name;};
+
+/* ---------- ROLES / MODULES / STEPS ---------- */
+const DEST={PHOTOS:'PHOTOS',SMARTREADINESS:'PHOTOS/SMARTREADINESS',BEP:'PHOTOS/BEP',BMO:'PHOTOS/BMO',FLOORBOX:'PHOTOS/FLOORBOX',ODEFSI:'PHOTOS/ΟΔΕΥΣΗ',BCP:'PHOTOS/BCP',CHM:'PHOTOS/ΧΩΜΑΤΟΥΡΓΙΚΑ',KBN:'PHOTOS/ΚΑΜΠΙΝΑ',SXEDIA:'ΣΧΕΔΙΑ',FAULT:'PHOTOS/ΒΛΑΒΗ'};
+const MODULE_LABEL={BEPBMO:"BEP + BMO",FB:"FB",SMARTPOINTS:"Smart Points",GEN:"Γενική Όδευση",BCP:"BCP",KL_BEPBMO:"Κολλητής — BEP/BMO",KL_FB:"Κολλητής — FB",KL_BCP:"Κολλητής — BCP",KBN:"Κολλητής — CAB",CHM:"Χωματουργικά",AP_SXEDIA:"Αυτοψία — ΣΧΕΔΙΑ/Βίντεο",AUTOPSY:"Στοιχεία Αυτοψίας"};
+const ROLE_MODULES={XM:["CHM","GEN"],KS:["BEPBMO","FB","SMARTPOINTS","GEN","BCP"],KL:["KL_BEPBMO","KL_FB","KL_BCP","KBN"],AP:["AUTOPSY","AP_SXEDIA","GEN"]};
+const STEPS={BEPBMO:[{id:"BEPBMO_BEFORE",label:"BEP-BMO ΠΡΙΝ",label_for_name:"BEP-BMO.before{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"BEPBMO_AFTER",label:"BEP-BMO AFTER",label_for_name:"BEP-BMO.after{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"BEP_GEN",label:"BEP γενική",label_for_name:"BEP.geniki{SEQ}",primary_dest:"BEP"},
+{id:"BMO_GEN",label:"BMO γενική",label_for_name:"BMO.geniki{SEQ}",primary_dest:"BMO"}],
+FB:[{id:"FB_GEN",label:"FB γενική [F]",label_for_name:"FB{LEVEL2}.geniki{SEQ}",primary_dest:"FLOORBOX",requires_level:true,floor:"+00",seq:1},
+{id:"FB_ROUTE",label:"Όδευση FB [F]",label_for_name:"FB{LEVEL2}.odefsi{SEQ}",primary_dest:"SMARTREADINESS",requires_level:true,floor:"+00",seq:1}],
+SMARTPOINTS:[{id:"MHE_AFTER",label:"AFTER ΜΗΕ",label_for_name:"MHE.after{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"MHE_ROUTE",label:"ODEFSI ΜΗΕ",label_for_name:"MHE.odefsi{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"FY_AFTER",label:"AFTER ΦΥ",label_for_name:"FY.after{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"FY_ROUTE",label:"ODEFSI ΦΥ",label_for_name:"FY.odefsi{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"KTH_AFTER",label:"AFTER ΚΘ",label_for_name:"KTH.after{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"KTH_ROUTE",label:"ODEFSI ΚΘ",label_for_name:"KTH.odefsi{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"MA_AFTER",label:"AFTER ΜΑ",label_for_name:"MA.after{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"MA_ROUTE",label:"ODEFSI ΜΑ",label_for_name:"MA.odefsi{SEQ}",primary_dest:"SMARTREADINESS"}],
+GEN:[{id:"GEN_ROUTE",label:"Γενική όδευση",label_for_name:"geniki.odefsi{SEQ}",primary_dest:"ODEFSI"}],
+KL_BEPBMO:[{id:"BEP_OPEN",label:"BEP OPEN",label_for_name:"BEP.open{SEQ}",primary_dest:"BEP"},
+{id:"BEP_CLOSE",label:"BEP CLOSED",label_for_name:"BEP.closed{SEQ}",primary_dest:"SMARTREADINESS"},
+{id:"BMO_OPEN",label:"BMO OPEN",label_for_name:"BMO.open{SEQ}",primary_dest:"BMO"},
+{id:"BMO_CLOSE",label:"BMO CLOSED",label_for_name:"BMO.closed{SEQ}",primary_dest:"SMARTREADINESS"}],
+KL_FB:[{id:"FB_OPEN",label:"FB OPEN [F]",label_for_name:"FB{LEVEL2}.open{SEQ}",primary_dest:"FLOORBOX",requires_level:true,floor:"+00",seq:1},
+{id:"FB_CLOSED",label:"FB CLOSED [F]",label_for_name:"FB{LEVEL2}.closed{SEQ}",primary_dest:"SMARTREADINESS",requires_level:true,floor:"+00",seq:1}],
+KL_BCP:[{id:"BCP_OPEN",label:"BCP OPEN",label_for_name:"BCP.open{SEQ}",primary_dest:"BCP"},
+{id:"BCP_CLOSE",label:"BCP CLOSED",label_for_name:"BCP.closed{SEQ}",primary_dest:"BCP"}],
+KBN:[{id:"CAB",label:"CAB",label_for_name:"CAB{SEQ}",primary_dest:"KBN"}],
+CHM:[{id:"XM_PRIN",label:"Πριν σκάμμα",label_for_name:"skamma.prin{SEQ}",primary_dest:"CHM"},
+{id:"XM_OPEN",label:"Σκάμμα ανοιχτό",label_for_name:"skamma.open{SEQ}",primary_dest:"CHM"},
+{id:"XM_SIG",label:"Σκάμμα με σήμανση",label_for_name:"skamma.simansi{SEQ}",primary_dest:"CHM"},
+{id:"XM_APOK",label:"Αποκατάσταση",label_for_name:"skamma.apokatastasi{SEQ}",primary_dest:"CHM"},
+{id:"XM_VLAVI",label:"Βλάβη",label_for_name:"vlavi{SEQ}",primary_dest:"FAULT"}],
+AP_SXEDIA:[{id:"AP_SIDEWALK",label:"Πεζοδρόμιο εκσκαφής (photo)",label_for_name:"ap.sidewalk{SEQ}",primary_dest:"SXEDIA"},
+{id:"AP_TOMI",label:"Σχέδιο τομής (pdf/photo)",label_for_name:"ap.tomi{SEQ}",primary_dest:"SXEDIA"},
+{id:"AP_FSS",label:"FSS (.xls/.xlsx)",label_for_name:"ap.fss{SEQ}",primary_dest:"SXEDIA",type:"file"},
+{id:"AP_VIDEO",label:"Βίντεο περιγραφής",label_for_name:"ap.video{SEQ}",primary_dest:"SXEDIA",type:"video"}]};
+
+/* Roles */
+function setRole(r){
+  state.role=r; roleInfo.textContent='Ρόλος: '+r; renderModules(); state.module=null; state.checklist=[]; renderChecklist();
+  var structurePage=document.getElementById('page-structure');
+  document.getElementById('smartCard').style.display=(r==='KS')?'block':'none';
+  structurePage.style.display=(r==='KS'||r==='KL')?'block':'none';
+  var btns=document.querySelectorAll('.rolebtn'); for(var i=0;i<btns.length;i++){ var b=btns[i]; b.classList.toggle('active', b.getAttribute('data-role')===r); }
+  state.greekRole = (ROLE_GREEK_MAP[r]||''); try{ localStorage.setItem('defRoleCode', r);} catch(e){}
+  loadTechsForRole(state.greekRole); updateTechInfo();
+}
+
+/* Checklist */
+function byId(arr,id){return arr.find(x=>x&&x.id===id)}
+function buildChecklistForModule(){
+  const out=[], m=state.module; if(!m){state.checklist=[];return;}
+  if(m==="BEPBMO"){out.push(byId(STEPS.BEPBMO,'BEPBMO_BEFORE'),byId(STEPS.BEPBMO,'BEPBMO_AFTER'),byId(STEPS.BEPBMO,'BEP_GEN'),byId(STEPS.BEPBMO,'BMO_GEN'));}
+  if(m==="FB"){state.floors.forEach(f=>{const c=+state.fbPerFloor[f]||1;for(let i=1;i<=c;i++)out.push({...byId(STEPS.FB,'FB_GEN'),floor:f,seq:i});const r=+state.routePerFloor[f]||1;for(let j=1;j<=r;j++)out.push({...byId(STEPS.FB,'FB_ROUTE'),floor:f,seq:j});});}
+  if(m==="SMARTPOINTS"&&state.smartReady){['MHE','FY','KTH','MA'].forEach(sig=>{if(state.sp[sig]){out.push(byId(STEPS.SMARTPOINTS,sig+'_ROUTE'));out.push(byId(STEPS.SMARTPOINTS,sig+'_AFTER'));}});}
+  if(m==="GEN"){out.push(byId(STEPS.GEN,'GEN_ROUTE'));}
+  if(m==="BCP"){out.push(byId(STEPS.KL_BCP,'BCP_OPEN'),byId(STEPS.KL_BCP,'BCP_CLOSE'));}
+  if(m==="KL_BEPBMO"){out.push(byId(STEPS.KL_BEPBMO,'BEP_OPEN'),byId(STEPS.KL_BEPBMO,'BEP_CLOSE'),byId(STEPS.KL_BEPBMO,'BMO_OPEN'),byId(STEPS.KL_BEPBMO,'BMO_CLOSE'));}
+  if(m==="KL_FB"){state.floors.forEach(f=>{const c=+state.fbPerFloor[f]||1;for(let i=1;i<=c;i++){out.push({...byId(STEPS.KL_FB,'FB_OPEN'),floor:f,seq:i},{...byId(STEPS.KL_FB,'FB_CLOSED'),floor:f,seq:i});}});}
+  if(m==="KL_BCP"){out.push(byId(STEPS.KL_BCP,'BCP_OPEN'),byId(STEPS.KL_BCP,'BCP_CLOSE'));}
+  if(m==="KBN"){out.push(byId(STEPS.KBN,'CAB'));}
+  if(m==="CHM"){out.push(byId(STEPS.CHM,'XM_PRIN'),byId(STEPS.CHM,'XM_OPEN'),byId(STEPS.CHM,'XM_SIG'),byId(STEPS.CHM,'XM_APOK'),byId(STEPS.CHM,'XM_VLAVI'));}
+  if(m==="AP_SXEDIA"){out.push(byId(STEPS.AP_SXEDIA,'AP_SIDEWALK'),byId(STEPS.AP_SXEDIA,'AP_TOMI'),byId(STEPS.AP_SXEDIA,'AP_FSS'),byId(STEPS.AP_SXEDIA,'AP_VIDEO'));}
+  state.checklist=out.filter(Boolean);
+}
+function renderModules(){
+  modulesRow.innerHTML="";
+  let mods = (ROLE_MODULES[state.role]||[]).slice();
+  if(state.bepOnly){ mods = mods.filter(x=>['BEPBMO','BCP','SMARTPOINTS','AUTOPSY'].includes(x)); }
+  mods.forEach(m=>{
+    const btn=document.createElement('button'); btn.className='btn'; 
+    btn.textContent=(MODULE_LABEL[m]|| (m==='AUTOPSY'?'Στοιχεία Αυτοψίας':m));
+    if(state.module===m) btn.classList.add('active');
+    btn.onclick=()=>{
+      state.module=m; 
+      [...modulesRow.querySelectorAll('.btn')].forEach(x=>x.classList.toggle('active', x===btn));
+      moduleInfo.textContent='Module: '+btn.textContent;
+      state.currentIndex=0;
+      buildChecklistForModule();
+      renderChecklist();
+      go('#/shoot');
+    };
+    modulesRow.appendChild(btn);
+  });
+}
+function renderChecklist(){ 
+  const checklistElement = document.getElementById('checklist');
+  
+  try{
+    if(state && state.module==='AUTOPSY'){
+      const panel=document.getElementById('autopsyPanel');
+      const host=document.getElementById('modulesRow').parentNode;
+      if(panel && host){ 
+        panel.style.display='block'; 
+        host.parentNode.insertBefore(panel, host.nextSibling); 
+      }
+      // ΚΡΥΨΕ ΤΟ CHECKLIST
+      if (checklistElement) checklistElement.style.display = 'none';
+      return;
+    }else{
+      const panel=document.getElementById('autopsyPanel'); 
+      if(panel) panel.style.display='none';
+      // ΕΜΦΑΝΙΣΕ ΤΟ CHECKLIST
+      if (checklistElement) checklistElement.style.display = 'block';
+    }
+  }catch(_){}
+  
+  checklistElement.innerHTML="";
+  if(!state.checklist.length){checklistElement.innerHTML='<div class="muted">Δεν υπάρχουν βήματα. Διάλεξε module.</div>';return;}
+  state.checklist.forEach((step,idx)=>{
+    const box=document.createElement('div'); box.className='item';
+    const a=document.createElement('div'); a.style.fontWeight='900'; a.textContent=step.label;
+    const b=document.createElement('div'); b.className='muted'; let n='stepId: '+step.id; if(step.floor!=null)n+=' • F'+step.floor; if(step.seq!=null)n+=' • #'+step.seq; b.textContent=n;
+    const row=document.createElement('div'); row.className='grid2'; row.style.marginTop='8px';
+    const c=document.createElement('button'); c.className='btn blk'; c.textContent=(step.type==='video')?'Βίντεο':(step.type==='file'?'Αρχείο (.xls)':'Κάμερα/Συλλογή'); c.onclick=()=>openModalAt(idx);
+    const d=document.createElement('button'); d.className='btn'; d.textContent='Φάκελοι'; d.onclick=()=>alert(destinationsFor(step).join('\n'));
+    row.append(c,d); box.append(a,b,row); checklistElement.appendChild(box);
+  });
+}
+
+/* Floors / Smart */
+const ALL_FLOORS=["-02","-01","+00","+01","+02","+03","+04","+05","+06","+07","+08","+09"];
+function paintFloors(){
+  try{
+    floorsGrid.innerHTML = "";
+    // draw floor buttons
+    ALL_FLOORS.forEach(function(f){
+      var b = document.createElement('button'); 
+      b.className = 'btn'; 
+      b.textContent = 'F'+f;
+      if(state.floors.indexOf(f)>-1){ b.style.background='#111'; b.style.color='#fff'; b.style.borderColor='#111'; }
+      b.onclick = function(){
+        var i = state.floors.indexOf(f);
+        if(i>-1){ state.floors.splice(i,1); delete state.fbPerFloor[f]; delete state.routePerFloor[f]; }
+        else { state.floors.push(f); state.fbPerFloor[f]=state.fbPerFloor[f]||1; state.routePerFloor[f]=state.routePerFloor[f]||1; }
+        paintFloors(); buildChecklistForModule(); renderChecklist();
+      };
+      floorsGrid.appendChild(b);
+    });
+
+    // per-floor details
+    floorDetails.innerHTML = "";
+    if(!state.floors.length){
+      floorDetails.innerHTML = '<div class="muted">Κανένας όροφος επιλεγμένος.</div>';
+      return;
+    }
+    state.floors.forEach(function(f){
+      var row = document.createElement('div');
+      row.className = 'row';
+      row.style.alignItems = 'center';
+
+      var badge = document.createElement('div'); badge.className='badge'; badge.textContent='F'+f;
+      var l1 = document.createElement('span'); l1.className='muted'; l1.style.margin='0.8px'; l1.textContent='FB/όροφο:';
+      var fb = document.createElement('input'); fb.type='number'; fb.min='1'; fb.value = state.fbPerFloor[f]||1; fb.style.width='30px';
+      fb.onchange = function(){ var n=parseInt(fb.value||'1',10); if(isNaN(n)||n<1) n=1; state.fbPerFloor[f]=n; buildChecklistForModule(); renderChecklist(); };
+      var l2 = document.createElement('span'); l2.className='muted'; l2.style.margin='0.8px'; l2.textContent='Όδευση/όροφο:';
+      var rt = document.createElement('input'); rt.type='number'; rt.min='1'; rt.value = state.routePerFloor[f]||1; rt.style.width='30px';
+      rt.onchange = function(){ var n=parseInt(rt.value||'1',10); if(isNaN(n)||n<1) n=1; state.routePerFloor[f]=n; buildChecklistForModule(); renderChecklist(); };
+
+      row.appendChild(badge); row.appendChild(l1); row.appendChild(fb); row.appendChild(l2); row.appendChild(rt);
+      floorDetails.appendChild(row);
+    });
+  }catch(e){
+    try{ console.error('paintFloors error', e); }catch(_){} 
+  }
+}
+function paintSmart(){smartInfo.textContent=state.smartReady?'Smart Readiness: ΝΑΙ':'Smart Readiness: ΟΧΙ';srModules.style.display=state.smartReady?'flex':'none';srYes.classList.toggle('on',state.smartReady);srNo.classList.toggle('on',!state.smartReady);}
+srYes.onclick=()=>{state.smartReady=true;paintSmart();buildChecklistForModule();renderChecklist();}
+srNo.onclick=()=>{state.smartReady=false;paintSmart();buildChecklistForModule();renderChecklist();}
+srModules.querySelectorAll('input[type=checkbox]').forEach(chk=>chk.onchange=()=>{state.sp[chk.dataset.sp]=chk.checked;buildChecklistForModule();renderChecklist();});
+
+/* DEST & NAMES */
+function destinationsFor(step){
+  const map={SMARTREADINESS:DEST.SMARTREADINESS,BEP:DEST.BEP,BMO:DEST.BMO,FLOORBOX:DEST.FLOORBOX,ODEFSI:DEST.ODEFSI,BCP:DEST.BCP,CHM:DEST.CHM,KBN:DEST.KBN,SXEDIA:DEST.SXEDIA,FAULT:DEST.FAULT};
+  const primary=map[step.primary_dest]||DEST.PHOTOS, extra=[];
+  const isSP=/\b(MHE|FY|KTH|MA)\b/i.test(step.label_for_name||"");
+  if(step.primary_dest==="SMARTREADINESS"&&!isSP&&step.id!=="BEPBMO_BEFORE"&&step.id!=="BEPBMO_AFTER"){
+    if(step.id.includes("FB")||step.label.includes("FB")) extra.push(DEST.FLOORBOX);
+    if(step.id.includes("BEP")||step.label.includes("BEP")) extra.push(DEST.BEP);
+    if(step.id.includes("BMO")||step.label.includes("BMO")) extra.push(DEST.BMO);
+    if(step.id.includes("BCP")||step.label.includes("BCP")) extra.push(DEST.BCP);
+  }
+  if(step.id==="BEP_CLOSE") extra.push(DEST.BEP);
+  if(step.id==="BMO_CLOSE") extra.push(DEST.BMO);
+  if(step.id==="FB_CLOSED") extra.push(DEST.FLOORBOX);
+  const out=[],seen={}; [primary].concat(extra).forEach(x=>{if(!seen[x]){seen[x]=1;out.push(x)}}); return out;
+}
+function nowStamp(){const d=new Date();const p=n=>String(n).padStart(2,"0");return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());}
+function fbName(step,floor,shot){const floorTag=floor?'('+floor+')':'';let kind='geniki';if(step.id==='FB_OPEN')kind='open';else if(step.id==='FB_CLOSED')kind='closed';else if(step.id==='FB_ROUTE')kind='odefsi';const p='.p'+String(shot||1).padStart(2,'0');return `FB${floorTag}.${kind}${p}.jpg`;}
+function buildName(job,roleId,step,floor,seq,shot){
+  if(/^FB_/.test(step.id)) return fbName(step,floor,shot);
+  const special={'BEP_OPEN':'BEP.open','BEP_CLOSE':'BEP.closed','BMO_OPEN':'BMO.open','BMO_CLOSE':'BMO.closed','BCP_OPEN':'BCP.open','BCP_CLOSE':'BCP.closed','BEPBMO_BEFORE':'BEP-BMO.before','BEPBMO_AFTER':'BEP-BMO.after','MHE_ROUTE':'MHE.odefsi','MHE_AFTER':'MHE.after','FY_ROUTE':'FY.odefsi','FY_AFTER':'FY.after','KTH_ROUTE':'KTH.odefsi','KTH_AFTER':'KTH.after','MA_ROUTE':'MA.odefsi','MA_AFTER':'MA.after','XM_PRIN':'skamma.prin','XM_OPEN':'skamma.open','XM_SIG':'skamma.simansi','XM_APOK':'skamma.apokatastasi','XM_VLAVI':'vlavi'};
+  if(special[step.id]){const p='.p'+String(shot||1).padStart(2,'0');const ext=(step.type==='video')?'.mp4':(step.type==='file'?'.xls':'.jpg');return `${special[step.id]}${p}${ext}`;}
+  const token=step.label_for_name.replace(/\{LEVEL2\}/g,(floor!=null?String(floor):"")).replace(/\{SEQ\}/g,String(seq||1));
+  const suff=(shot>1)?".p"+String(shot).padStart(2,"0"):""; const ext=(step.type==='video')?'.mp4':(step.type==='file'?'.xls':'.jpg');
+  return `${token}${suff}${ext}`;
+}
+function currentShotCount(stepId,floor,seq){const same=state.items.filter(it=>it.type==="photo"&&it.stepId===stepId&&String(it.floor||"")===String(floor||"")&&String(it.seq||1)===String(seq||1));return same.length+1;}
+
+/* VALIDATION */
+function validateFile(file,allowFss=false){
+  const max=50*1024*1024, name=(file.name||'').toLowerCase();
+  const isIolm=name.endsWith('.iolm'); const isFss=allowFss&&(/\.(xls|xlsx)$/i.test(name));
+  if(file.size>max) throw new Error(`Πολύ μεγάλο (${(file.size/1024/1024).toFixed(1)}MB > 50MB)`);
+  if(!((file.type&&(file.type.startsWith('image')||file.type.startsWith('video')||file.type==='application/pdf'))||isIolm||isFss)) throw new Error('Μη υποστηριζόμενος τύπος');
+  return true;
+}
+
+/* THUMBS */
+function ensureThumb(item){
+  if(item.thumb) return;
+  if(item.type==='photo'){ item.thumb=URL.createObjectURL(item.file); }
+  else if(item.type==='video'){ try{ const v=document.createElement('video'); v.muted=true; v.src=URL.createObjectURL(item.file);
+    v.onloadeddata=()=>{ const c=document.createElement('canvas'); const r=Math.min(1,320/Math.max(1,v.videoWidth)); c.width=Math.max(1,Math.round(v.videoWidth*r)); c.height=Math.max(1,Math.round(v.videoHeight*r)); c.getContext('2d').drawImage(v,0,0,c.width,c.height); c.toBlob(b=>{ if(b) item.thumb=URL.createObjectURL(b); renderGallery(); },'image/jpeg',0.7); }; } catch(e){ } }
+}
+
+/* ADD ITEMS */
+async function addShotFromFile(file){
+  try{
+    validateFile(file,false);
+    const step=state.checklist[state.currentIndex]; if(!step){ closeModal(); return; }
+    const floor=step.floor||null, seq=step.seq||1, shot=currentShotCount(step.id,floor,seq);
+    const name=buildName(state.job,state.role,step,floor,seq,shot), dest=destinationsFor(step);
+    const item={type:'photo',name,destinations:dest,stepId:step.id,floor,seq,shot,file,status:'pending'};
+    state.items.push(item); ensureThumb(item); renderGallery(); uploadInfo.textContent='✅ Προστέθηκε: '+name;
+  } catch(err){ uploadInfo.textContent='Σφάλμα: '+err.message; }
+}
+async function addVideoFromFile(file){
+  try{
+    validateFile(file,false);
+    const step=state.checklist[state.currentIndex]; if(!step||step.type!=='video'){ alert('Το βήμα δεν είναι για βίντεο'); return; }
+    const name=(state.job&&state.job.sr?state.job.sr+'_':'video_')+nowStamp()+'.mp4', dest=destinationsFor(step);
+    const item={type:'video',name,destinations:dest,stepId:step.id,file,status:'pending'};
+    state.items.push(item); ensureThumb(item); renderGallery(); uploadInfo.textContent='✅ Προστέθηκε βίντεο';
+  } catch(err){ uploadInfo.textContent='Σφάλμα: '+err.message; }
+}
+async function addFssFile(file){
+  const step=state.checklist[state.currentIndex];
+  const name=/xlsx$/i.test(file.name||'')?('FSS_'+nowStamp()+'.xlsx'):('FSS_'+nowStamp()+'.xls');
+  const dest=destinationsFor(step); const item={type:'file',name,destinations:dest,stepId:step.id,file,status:'pending'};
+  state.items.push(item); renderGallery(); uploadInfo.textContent='✅ Προστέθηκε FSS';
+}
+
+/* MODAL open/close */
 function openModalAt(i){
   state.currentIndex=i; const step=state.checklist[i];
   modalStepLabel.textContent=step?step.label:'-';
@@ -362,53 +806,7 @@ btnClose.onclick=closeModal;
 btnAgain.onclick=()=>fileCam.click();
 btnNext.onclick=()=>{ if(state.currentIndex<state.checklist.length-1){ state.currentIndex++; openModalAt(state.currentIndex);} else closeModal(); };
 
-/* ---------- ADD ITEMS ---------- */
-const galleryEl=document.getElementById('gallery'), galleryEmpty=document.getElementById('galleryEmpty');
-const itemCount=document.getElementById('itemCount'), uploadCount=document.getElementById('uploadCount');
-function validateFile(file,isGeneric){
-  if(!file) throw new Error('Άκυρο αρχείο');
-  if(!isGeneric && file.type && !/^(image|video)\//.test(file.type) && !/(\.pdf|\.xls|\.xlsx|\.iolm)$/i.test(file.name||''))
-    throw new Error('Μη υποστηριζόμενο αρχείο: '+(file.type||file.name));
-}
-function destinationsFor(step){
-  const d=['PHOTOS'];
-  if(step && step.id && /BEP/i.test(step.id)) d.unshift('BEP');
-  return d;
-}
-function ensureThumb(item){
-  if(item.thumb) return;
-  try{
-    if(item.type==='photo'){ item.thumb=URL.createObjectURL(item.file); }
-    else if(item.type==='video'){ item.thumb=''; } // leave empty to avoid heavy work
-    else { item.thumb=''; }
-  }catch(e){ item.thumb=''; }
-}
-function addShotFromFile(file){
-  validateFile(file,false);
-  const step=state.checklist[state.currentIndex];
-  const base=(step?step.id:'SHOT')+'_'+nowStamp();
-  const name=base+'.jpg';
-  const dest=destinationsFor(step);
-  const item={type:'photo',name,destinations:dest,stepId:(step?step.id:''),file,status:'pending'};
-  state.items.push(item); renderGallery(); uploadInfo.textContent='✅ Προστέθηκε φωτογραφία';
-}
-function addVideoFromFile(file){
-  validateFile(file,false);
-  const step=state.checklist[state.currentIndex];
-  const base=(step?step.id:'VIDEO')+'_'+nowStamp();
-  const name=base+'.mp4';
-  const dest=destinationsFor(step);
-  const item={type:'video',name,destinations:dest,stepId:(step?step.id:''),file,status:'pending'};
-  state.items.push(item); renderGallery(); uploadInfo.textContent='✅ Προστέθηκε βίντεο';
-}
-function addFssFile(file){
-  const step=state.checklist[state.currentIndex];
-  const name=/xlsx$/i.test(file.name||'')?('FSS_'+nowStamp()+'.xlsx'):('FSS_'+nowStamp()+'.xls');
-  const dest=destinationsFor(step); const item={type:'file',name,destinations:dest,stepId:step.id,file,status:'pending'};
-  state.items.push(item); renderGallery(); uploadInfo.textContent='✅ Προστέθηκε FSS';
-}
-
-/* Inputs */
+/* >>> FIX: file inputs handlers <<< */
 fileCam.onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(f){ addShotFromFile(f); } e.target.value=''; };
 fileVid.onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(f){ addVideoFromFile(f); } e.target.value=''; };
 fileGal.onchange=e=>{
@@ -417,13 +815,13 @@ fileGal.onchange=e=>{
   for(const f of files){
     const low=(f.name||'').toLowerCase();
     if(step && step.id==='AP_FSS' && /\.(xls|xlsx)$/i.test(low)){ addFssFile(f); continue; }
-    if((f.type||'').startsWith('video')){ addVideoFromFile(f); continue; }
+    if((f.type||'').startsWith('video')){ if(step && step.type==='video') addVideoFromFile(f); else addVideoFromFile(f); continue; }
     addShotFromFile(f);
   }
   e.target.value='';
 };
 
-/* ---------- GALLERY RENDER ---------- */
+/* GALLERY + Filters */
 document.querySelectorAll('.filter-btn').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); state.filter=b.dataset.filter; renderGallery();}));
 function renderGallery(){
   const list=state.items.filter(it=>{
@@ -450,138 +848,1463 @@ function renderGallery(){
     const rep=document.createElement('button'); rep.className='btn'; rep.textContent='🔁'; rep.onclick=()=>{ const i=document.createElement('input'); i.type='file'; i.accept=item.type==='photo'?'image/*':(item.type==='video'?'video/*':'application/pdf,.iolm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); i.onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; try{ validateFile(f,item.type==='file'); item.file=f; item.status='pending'; if(item.thumb) try{URL.revokeObjectURL(item.thumb)} catch(e){ } item.thumb=null; ensureThumb(item); renderGallery(); } catch(err){ alert(err.message); } }; i.click(); };
     row.append(img,name,rep);
     const meta=document.createElement('div'); meta.className='muted'; meta.textContent=[`βήμα: ${item.stepId||'-'}`,`μέγεθος: ${(item.file.size/1024/1024).toFixed(1)}MB`].join(' • ');
-    const dest=document.createElement('div'); dest.className='muted'; dest.style.fontSize='11px'; dest.textContent='📁 '+(item.destinations||[]).join(' / ');
-    box.append(head,row,meta,dest);
-    galleryEl.appendChild(box);
+    const dest=document.createElement('div'); dest.className='muted'; dest.style.fontSize='11px'; dest.textContent='📁 '+(item.destinations||[]).join(' , ');
+    const del=document.createElement('button'); del.className='btn'; del.textContent='🗑️'; del.style.marginTop='8px'; del.onclick=()=>{ const idx=state.items.findIndex(x=>x===item); if(idx>-1){ if(item.thumb) try{URL.revokeObjectURL(item.thumb)} catch(e){ } state.items.splice(idx,1); renderGallery(); } };
+    box.append(head,row,meta,dest,del); galleryEl.appendChild(box);
   });
 }
-renderGallery();
 
-/* ---------- UPLOAD ---------- */
-const uploadInfo=document.getElementById('uploadInfo');
-const uploadStatus=document.getElementById('uploadStatus'), statusText=document.getElementById('statusText'), statusPercent=document.getElementById('statusPercent'), statusProgress=document.getElementById('statusProgress');
-async function robustReadBase64(file){
-  const buf = await file.arrayBuffer();
-  let binary = ''; const bytes = new Uint8Array(buf); const len = bytes.byteLength;
-  for (let i=0;i<len;i++){ binary += String.fromCharCode(bytes[i]); }
-  return btoa(binary);
-}
+/* UPLOAD */
+async function robustReadBase64(file){ const ab=await file.arrayBuffer(); const bytes=new Uint8Array(ab); let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]); return btoa(bin); }
 async function compressPhotoToJpegB64(file){
-  // light touch: we keep it simple here; in previous versions we used canvas/quality
-  const buf=await file.arrayBuffer(); let binary=''; const bytes=new Uint8Array(buf); for(let i=0;i<bytes.length;i++){binary+=String.fromCharCode(bytes[i]);}
-  return btoa(binary);
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{ const max=2200; const sc=Math.min(1,max/Math.max(img.width,img.height)); const w=Math.round(img.width*sc),h=Math.round(img.height*sc);
+      const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h);
+      const d=c.toDataURL('image/jpeg',0.82); resolve(d.split(',')[1]||''); };
+    img.onerror=()=>reject(new Error('image decode'));
+    img.src=URL.createObjectURL(file);
+  });
 }
-async function uploadToDrive(srName, items){
-  const cand=items.slice(); if(!cand.length) return;
-  uploadStatus.style.display='block'; statusText.textContent='Ανέβασμα…';
-  let done=0, failed=0; const failedNames=[];
+function isHeic(f){return /image\/(heic|heif)/i.test(f.type||'')||/\.heic$/i.test(f.name||'')}
+async function heicToJpegB64(file){ if(!window.heic2any) throw new Error('heic2any missing'); const blob=await window.heic2any({blob:file,toType:'image/jpeg',quality:0.9}); return await robustReadBase64(blob); }
+
+async function uploadToDrive(srName,items){
+  await getGeoOnce();
+
+  const cand=items.filter(x=>x.status!=='uploaded'&&x.status!=='uploading'); if(!cand.length){alert('Δεν υπάρχουν αρχεία για ανέβασμα');return;}
+  let done=0, failed=0, failedNames=[]; uploadStatus.style.display='block';
   for(let i=0;i<cand.length;i++){
-    const it=cand[i]; try{
-      statusPercent.textContent=Math.round((i/cand.length)*100)+'%'; statusProgress.style.width=Math.round((i/cand.length)*100)+'%';
-      let b64,mime='application/octet-stream';
-      if(it.type==='photo'){ b64=await compressPhotoToJpegB64(it.file); mime='image/jpeg'; }
-      else { const ab=await it.file.arrayBuffer(); let bin=''; const bytes=new Uint8Array(ab); for(let j=0;j<bytes.length;j++){ bin+=String.fromCharCode(bytes[j]); } b64=btoa(bin); mime=it.file.type||'application/octet-stream'; }
+    const it=cand[i]; let b64='', mime=it.file.type||'application/octet-stream';
+    try{
+      it.status='uploading'; renderGallery();
+      statusText.textContent=`Προετοιμασία ${i+1}/${cand.length}…`; statusPercent.textContent=Math.round((i/cand.length)*100)+'%'; statusProgress.style.width=Math.round((i/cand.length)*100)+'%';
+      if(it.type==='photo'){
+        if(isHeic(it.file)){ const h=await heicToJpegB64(it.file); const tmp=new Blob([Uint8Array.from(atob(h),c=>c.charCodeAt(0))],{type:'image/jpeg'}); b64=await compressPhotoToJpegB64(tmp); mime='image/jpeg';}
+        else if((it.file.type||'').startsWith('image')){ b64=await compressPhotoToJpegB64(it.file); mime='image/jpeg';}
+        else { b64=await robustReadBase64(it.file); }
+      }else{ b64=await robustReadBase64(it.file); }
       const payload={srName,techName:(state.techName||''),role:(state.greekRole||''),geo:(state.geo||null),files:[{filename:it.name,mimeType:mime,contentBase64:b64,destinations:it.destinations||['PHOTOS']}]};
-      const res=await fetch(WEBAPP_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
-      const text=await res.text(); let json; try{ json=JSON.parse(text); } catch(e){ throw new Error('Μη έγκυρη απάντηση'); }
+      const opts={method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)}; if(IS_LOCAL_ORIGIN) opts.mode='no-cors';
+      const res=await fetch(WEBAPP_URL,opts);
+      if(IS_LOCAL_ORIGIN&&res.type==='opaque'){ it.status='uploaded'; renderGallery(); done++; continue; }
+      const text=await res.text(); let json; try{json=JSON.parse(text)} catch(e){ throw new Error('Μη έγκυρη απάντηση'); }
       if(!json.ok) throw new Error(json.error||'ok:false');
       it.status='uploaded'; renderGallery(); done++;
-    }catch(e){ it.status='error'; failed++; failedNames.push(it.name); renderGallery(); }
+    } catch(e){ it.status='error'; failed++; failedNames.push(it.name); renderGallery(); }
   }
   statusText.textContent='Ολοκληρώθηκε'; statusPercent.textContent='100%'; statusProgress.style.width='100%';
   setTimeout(()=>uploadStatus.style.display='none',1200);
-  const msg=`Ανέβηκαν: ${done}`+(failed?` — Απέτυχαν: ${failed}`:''); uploadInfo.textContent=msg; if(failed) alert(msg+'\\n- '+failedNames.join('\\n- '));
+  const msg=`Ανέβηκαν: ${done}`+(failed?` — Απέτυχαν: ${failed}`:''); uploadInfo.textContent=msg; if(failed) alert(msg+'\n- '+failedNames.join('\n- '));
 }
-document.getElementById('btnUploadAll').onclick=()=>{ if(!state.job||!state.job.srFolderName){alert('Διάλεξε SR και πάτα Ορισμός');go('#/sr');return;} if(!state.items.length){alert('Η συλλογή είναι άδεια');return;} uploadToDrive(state.job.srFolderName,state.items); };
-document.getElementById('btnClear').onclick=()=>{ if(confirm('Καθαρισμός λίστας;')){ state.items.forEach(it=>{ if(it.thumb) try{URL.revokeObjectURL(it.thumb)} catch(e){ } }); state.items=[]; renderGallery(); uploadInfo.textContent='—'; } };
+btnUploadAll.onclick=()=>{ if(!state.job||!state.job.srFolderName){alert('Διάλεξε SR και πάτα Ορισμός');go('#/sr');return;} if(!state.items.length){alert('Η συλλογή είναι άδεια');return;} uploadToDrive(state.job.srFolderName,state.items); };
+btnClear.onclick=()=>{ if(confirm('Καθαρισμός λίστας;')){ state.items.forEach(it=>{ if(it.thumb) try{URL.revokeObjectURL(it.thumb)} catch(e){ } }); state.items=[]; renderGallery(); uploadInfo.textContent='—'; } };
 
-/* ---------- listUploaded / Sync preview & open ---------- */
-var uploadedIndex={ byToken:new Map(), byName:new Set() };
-function getStepToken(name){ return String(name||'').toLowerCase().replace(/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/i,'').replace(/\s+/g,'').replace(/\.p\d{2}$/i,''); }
-function buildUploadedIndex(items){
-  uploadedIndex.byToken = new Map(); uploadedIndex.byName=new Set();
-  (items||[]).forEach(it=>{ uploadedIndex.byName.add(String(it.name||'').toLowerCase()); const t=String(it.token||getStepToken(it.name||'')); const arr=uploadedIndex.byToken.get(t)||[]; arr.push(it); uploadedIndex.byToken.set(t,arr); });
-}
-function refreshUploadedIndex(){
-  if(!state.job || !state.job.srFolderName){ return Promise.resolve(); }
-  return fetch(WEBAPP_URL+'?action=listUploaded&sr='+encodeURIComponent(state.job.srFolderName)+'&t='+(Date.now()))
-    .then(res=>res.json()).then(json=>{ if(json && json.ok){ buildUploadedIndex(json.items||json.files||[]); } });
+
+/* === DURABLE UPLOADER: 5-parallel with retries, wake lock, guard (non-persistent) === */
+(function(){
+  const N = 5;              // parallel workers
+  const MAX_RETRY = 5;      // per item
+  let running = false;
+  let paused = false;
+  let wake = null;
+
+  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+  function online(){ try { return (typeof navigator.onLine==='boolean' ? navigator.onLine : true) || IS_LOCAL_ORIGIN; } catch(e){ return true; } }
+
+  async function holdWake(){
+    try{ if('wakeLock' in navigator){ wake = await navigator.wakeLock.request('screen'); } } catch(e){}
+  }
+  async function releaseWake(){
+    try{ await wake?.release(); } catch(e){}
+    wake = null;
+  }
+
+  function candidates(){
+    return state.items.filter(x => x && x.status !== 'uploaded');
+  }
+
+  // Reuse existing helpers from this file
+  async function prepareB64(it){
+    try{
+      let b64 = '', mime = it.file?.type || 'application/octet-stream';
+      if(it.type === 'photo'){
+        if(isHeic(it.file)){
+          const h = await heicToJpegB64(it.file);
+          const tmp = new Blob([Uint8Array.from(atob(h), c=>c.charCodeAt(0))], {type:'image/jpeg'});
+          b64 = await compressPhotoToJpegB64(tmp); mime='image/jpeg';
+        }else if((it.file?.type||'').startsWith('image')){
+          b64 = await compressPhotoToJpegB64(it.file); mime='image/jpeg';
+        }else{
+          b64 = await robustReadBase64(it.file);
+        }
+      }else{
+        b64 = await robustReadBase64(it.file);
+      }
+      return {b64, mime};
+    } catch(e){
+      throw e;
+    }
+  }
+
+  async function sendOne(it, srName){
+    const prep = await prepareB64(it);
+    const payload = { srName, techName:(state.techName||''), role:(state.greekRole||''), geo:(state.geo||null), files:[{ filename: it.name, mimeType: prep.mime, contentBase64: prep.b64, destinations: it.destinations||['PHOTOS'] }] };
+    const opts = { method:'POST', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(payload) };
+    if (IS_LOCAL_ORIGIN) opts.mode='no-cors';
+    const res = await fetch(WEBAPP_URL, opts);
+    if(IS_LOCAL_ORIGIN && res.type==='opaque'){ return {ok:true}; }
+    const text = await res.text(); let json;
+    try{ json = JSON.parse(text); } catch(e){ throw new Error('Μη έγκυρη απάντηση'); }
+    if(!json.ok) throw new Error(json.error||'ok:false');
+    return {ok:true};
+  }
+
+  async function worker(srName){
+    while(true){
+      if(paused){ await sleep(500); continue; }
+      if(!online()){ await sleep(1200); continue; }
+      const it = state.items.find(x => x && x.status !== 'uploaded' && x.status !== 'uploading' && (x.tries||0) < MAX_RETRY);
+      if(!it) break;
+      it.status='uploading'; renderGallery();
+      try{
+        statusText.textContent = `Ανέβασμα…`;
+        await sendOne(it, srName);
+        it.status='uploaded'; it.error=null; renderGallery();
+      } catch(e){
+        const t = (it.tries||0) + 1;
+        it.tries = t; it.status = 'error'; it.error = (e && e.message) || 'upload failed';
+        renderGallery();
+        const backoff = Math.min(15000, 1000*Math.pow(2, t));
+        await sleep(backoff);
+      }
+      updateProgress();
+    }
+  }
+
+  function updateProgress(){
+    const all = state.items.filter(Boolean).length || 1;
+    const done = state.items.filter(x=>x && x.status==='uploaded').length;
+    const ratio = Math.round((done/all)*100);
+    statusText.textContent = `Ανέβηκαν ${done}/${all}`;
+    statusPercent.textContent = ratio + '%';
+    statusProgress.style.width = ratio + '%';
+    uploadCount.textContent = state.items.length;
+  }
+
+  async function startUpload(){
+    await getGeoOnce();
+
+    if(!state.job || !state.job.srFolderName){ alert('Διάλεξε SR και πάτα Ορισμός'); go('#/sr'); return; }
+    if(!state.items.length){ alert('Η συλλογή είναι άδεια'); return; }
+    uploadStatus.style.display = 'block';
+    updateProgress();
+    if(running) return;
+    running = true;
+    paused = false; await holdWake();
+    const srName = state.job.srFolderName;
+    const pendingCount = (state.items||[]).filter(x=>x && x.status!=='uploaded').length;
+const W = Math.max(1, Math.min(N, pendingCount));
+const ws = Array.from({length: W}, ()=> worker(srName));
+    await Promise.all(ws);
+    await releaseWake();
+    running = false;
+    setTimeout(()=> uploadStatus.style.display='none', 1200);
+  }
+
+  // Hook existing button
+  if (btnUploadAll) {
+    btnUploadAll.onclick = (e)=>{ e.preventDefault(); startUpload(); return false; };
+  }
+
+  // Auto resume on online
+  window.addEventListener('online', ()=>{ if(candidates().some(x=>x.status!=='uploaded')) startUpload(); });
+
+  // Warn if leaving with pending
+  window.addEventListener('beforeunload', (e)=>{
+    const pend = candidates().some(x=> x.status!=='uploaded');
+    if(pend){ e.preventDefault(); e.returnValue=''; }
+  });
+
+  // Initial progress paint
+  updateProgress();
+
+})();
+
+
+/* ---------- SYNC (list uploaded) ---------- */
+var pageSync = document.getElementById('page-sync');
+var btnSyncRefresh = document.getElementById('btnSyncRefresh');
+var syncInfo = document.getElementById('syncInfo');
+var syncList = document.getElementById('syncList');
+
+function parseStepFromName(name){
+  var base = String(name||'').toLowerCase()
+    .replace(/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/,'')
+    .replace(/\s+/g,'');
+  var m = base.match(/^(.*?)(?:\.p\d{2})?$/);
+  return (m && m[1]) || base;
 }
 
-const syncInfo=document.getElementById('syncInfo'), syncList=document.getElementById('syncList');
+<script>
+/* >>> replace refreshSync() ONLY <<< */
 function refreshSync(){
-  if(!state.job || !state.job.srFolderName){ syncInfo.textContent='Διάλεξε SR'; syncList.innerHTML=''; return; }
-  syncInfo.textContent='Φόρτωση…'; syncList.innerHTML='';
+  if(!state.job || !state.job.srFolderName){ 
+    alert('Διάλεξε SR και πάτα Ορισμός'); 
+    go('#/sr'); 
+    return; 
+  }
+  var syncInfo = document.getElementById('syncInfo');
+  var syncList = document.getElementById('syncList');
+  syncInfo.textContent='Φόρτωση…'; 
+  syncList.innerHTML='';
+
   fetch(WEBAPP_URL+'?action=listUploaded&sr='+encodeURIComponent(state.job.srFolderName)+'&t='+(Date.now()))
-    .then(r=>r.json())
-    .then(j=>{
-      if(!j || j.ok===false) throw new Error(j && j.error || 'listUploaded failed');
-      const items=j.items||j.files||[]; buildUploadedIndex(items);
-      // group by token
-      const map={}; items.forEach(f=>{ const t=getStepToken(f.name||''); (map[t]=map[t]||[]).push(f); });
-      const tokens=Object.keys(map).sort((a,b)=>a.localeCompare(b,'el'));
-      syncInfo.textContent='Σύνολο αρχείων: '+items.length+' • Βήματα: '+tokens.length;
-      tokens.forEach(tok=>{
-        const arr=map[tok].sort((a,b)=>String(a.name).localeCompare(String(b.name),'el'));
-        const box=document.createElement('div'); box.className='item';
-        const head=document.createElement('div'); head.style.display='flex'; head.style.justifyContent='space-between'; head.style.alignItems='center';
-        const t=document.createElement('div'); t.style.fontWeight='900'; t.textContent=tok;
-        const c=document.createElement('div'); c.className='badge'; c.textContent=arr.length+' αρχεία';
-        head.appendChild(t); head.appendChild(c);
-        const ul=document.createElement('div'); ul.className='muted'; ul.style.fontSize='11px'; ul.style.marginTop='6px';
-        ul.innerHTML = arr.map(f=>{
-          const view = f.id ? ` <a target="_blank" href="https://drive.google.com/file/d/${f.id}/view">Άνοιγμα</a>` : '';
-          return `• ${f.name} — ${humanSize(f.size||0)}${view}`;
-        }).join('<br>');
-        box.appendChild(head); box.appendChild(ul);
+    .then(function(res){ return res.json(); })
+    .then(function(json){
+      if(!json || json.ok===false){ throw new Error((json && json.error) || 'listUploaded failed'); }
+      var items = json.items || json.files || [];
+      // Χτίσε index για match με steps, αν το χρησιμοποιείς αλλού
+      if(typeof buildUploadedIndex==='function'){ buildUploadedIndex(items); }
+
+      if(!items.length){ syncInfo.textContent='Δεν βρέθηκαν ανεβασμένα αρχεία.'; return; }
+
+      // Ομαδοποίηση με ίδιο token βήματος
+      var map = {};
+      function stepTok(name){
+        return String(name||'')
+          .toLowerCase()
+          .replace(/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/,'')
+          .replace(/\s+/g,'')
+          .replace(/\.p\d{2}$/,'');
+      }
+      items.forEach(function(it){
+        var tok = it.token || stepTok(it.name);
+        (map[tok] = map[tok] || []).push(it);
+      });
+      var tokens = Object.keys(map).sort();
+      syncInfo.textContent = 'Σύνολο αρχείων: '+items.length+' • Βήματα: '+tokens.length;
+
+      tokens.forEach(function(tok){
+        var arr = map[tok].slice().sort(function(a,b){
+          return String(a.name).localeCompare(String(b.name),'el');
+        });
+
+        var box = document.createElement('div');
+        box.className = 'item';
+        box.style.padding = '10px';
+        box.style.border = '1px solid #e5e7eb';
+        box.style.borderRadius = '10px';
+        box.style.margin = '8px 0';
+
+        var head = document.createElement('div');
+        head.style.display='flex';
+        head.style.justifyContent='space-between';
+        head.style.alignItems='center';
+
+        var tt = document.createElement('div');
+        tt.style.fontWeight='900';
+        tt.textContent = tok;
+
+        var count = document.createElement('div');
+        count.className = 'badge';
+        count.textContent = arr.length+' αρχεία';
+
+        head.appendChild(tt); head.appendChild(count);
+        box.appendChild(head);
+
+        // λίστα αρχείων με actions
+        var list = document.createElement('div');
+        list.style.marginTop = '8px';
+        arr.forEach(function(f){
+          var row = document.createElement('div');
+          row.style.display='flex';
+          row.style.alignItems='center';
+          row.style.justifyContent='space-between';
+          row.style.gap='8px';
+          row.style.padding='6px 0';
+          row.style.borderTop='1px dashed #eee';
+
+          var left = document.createElement('div');
+          left.className='muted';
+          left.style.fontSize='12px';
+          left.style.flex='1 1 auto';
+          left.textContent = '• '+f.name;
+
+          var right = document.createElement('div');
+          right.style.display='flex';
+          right.style.gap='6px';
+          right.style.flex='0 0 auto';
+
+          var btnPrev = document.createElement('button');
+          btnPrev.textContent = '👁️ Preview';
+          btnPrev.style.border='1px solid #e5e7eb';
+          btnPrev.style.background='#fff';
+          btnPrev.style.borderRadius='10px';
+          btnPrev.style.padding='6px 10px';
+          btnPrev.style.fontWeight='800';
+          btnPrev.onclick = function(){
+            // χρήση του modal μας
+            window.DE_PREVIEW && window.DE_PREVIEW.show({ id:f.id, name:f.name });
+          };
+
+          var aOpen = document.createElement('a');
+          aOpen.textContent = '↗ Άνοιγμα';
+          aOpen.style.textDecoration='none';
+          aOpen.style.border='1px solid #e5e7eb';
+          aOpen.style.background='#fff';
+          aOpen.style.borderRadius='10px';
+          aOpen.style.padding='6px 10px';
+          aOpen.style.fontWeight='800';
+          aOpen.target='_blank'; aOpen.rel='noopener';
+          aOpen.href = window.DE_PREVIEW ? window.DE_PREVIEW.driveOpenUrl(f.id) : ('https://drive.google.com/file/d/'+encodeURIComponent(f.id)+'/view');
+
+          right.appendChild(btnPrev);
+          right.appendChild(aOpen);
+
+          row.appendChild(left);
+          row.appendChild(right);
+          list.appendChild(row);
+        });
+
+        box.appendChild(list);
         syncList.appendChild(box);
       });
     })
-    .catch(err=>{ syncInfo.textContent='Σφάλμα: '+(err && err.message || '—'); });
+    .catch(function(e){
+      syncInfo.textContent='Σφάλμα: '+(e && e.message || '—');
+    });
 }
-document.getElementById('btnSyncRefresh').onclick=refreshSync;
 
-/* ---------- ZIP: download ALL local (pending/uploaded/error) ---------- */
-async function downloadAllAsZip(){
-  if(!state.items.length){ alert('Δεν υπάρχουν τοπικά αρχεία'); return; }
-  const zip=new JSZip(); const folderName=(state.job && state.job.srFolderName) ? state.job.srFolderName : 'photos';
-  const root=zip.folder(folderName);
-  let added=0, skipped=0;
-  for(const it of state.items){
-    try{
-      if(!it.file){ skipped++; continue; }
-      const buf=await it.file.arrayBuffer();
-      root.file(it.name, buf);
-      added++;
-    }catch(_){ skipped++; }
-  }
-  const blob=await zip.generateAsync({type:'blob'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`${folderName}_${nowStamp()}.zip`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-  if(skipped){ alert(`ZIP ολοκληρώθηκε: ${added} αρχεία — ${skipped} χωρίς blob`); }
+// κράτα τους υπάρχοντες listeners σου όπως είναι (btnSyncRefresh, hashchange κ.λπ.)
+// Στο indexv2 φαίνονται ήδη έτοιμοι. :contentReference[oaicite:1]{index=1}
+</script>
+
+
+function refreshUploadedIndex(){
+  if(!state.job || !state.job.srFolderName){ return Promise.resolve(); }
+  return fetch(WEBAPP_URL+'?action=listUploaded&sr='+encodeURIComponent(state.job.srFolderName)+'&t='+(Date.now()))
+    .then(function(res){ return res.json(); })
+    .then(function(json){
+      if(json && json.ok){ buildUploadedIndex(json.items||json.files||[]); }
+    }, function(){ /* ignore */ });
 }
-document.getElementById('btnDownloadZip').onclick=downloadAllAsZip;
 
-/* ---------- Settings ---------- */
-document.getElementById('btnOpenSettings').onclick=()=>{ document.getElementById('de-settings-modal').style.display='flex'; document.getElementById('webappUrlInput').value=WEBAPP_URL; document.getElementById('techNameInput').value=state.techName; };
-document.getElementById('btnCloseSettings').onclick=()=>{ document.getElementById('de-settings-modal').style.display='none'; };
-document.getElementById('btnSaveSettings').onclick=()=>{
-  WEBAPP_URL = document.getElementById('webappUrlInput').value.trim();
-  state.techName = document.getElementById('techNameInput').value.trim();
-  localStorage.setItem('WEBAPP_URL', WEBAPP_URL);
-  localStorage.setItem('TECH_NAME', state.techName);
-  document.getElementById('de-settings-modal').style.display='none';
-};
-
-/* ---------- Service Worker ---------- */
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+// ===== Duplicate detection helpers =====
+function nextPageNameForToken(baseName, existingList){
+  var max = 0;
+  (existingList || []).forEach(function(f){
+    var m = String(f.name||'').match(/\.p(\d{2})\./i);
+    if(m){ var v = parseInt(m[1],10); if(!isNaN(v) && v>max) max=v; }
   });
+  var next = ('0' + (max+1)).slice(-2);
+  if (/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/i.test(baseName)) {
+    if (/\.p\d{2}\./i.test(baseName)) return baseName.replace(/\.p\d{2}\./i, '.p'+next+'.');
+    // αν δεν υπάρχει pNN, βάλε πριν την κατάληξη
+    return baseName.replace(/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/i, '.p'+next+'.$&'.slice(1));
+  }
+  return baseName;
+}
+
+function ensureNotDuplicateStepNameOrBump(name){
+  var token = getStepToken(name);
+  var existArr = uploadedIndex.byToken.get(token) || [];
+  if (existArr.length === 0) return { proceed:true, name:name, bumped:false };
+
+  var msg = 'Υπάρχει ήδη βήμα "'+token+'" ('+existArr.length+' αρχεία).\n'
+          + 'Θέλεις να συνεχίσεις ως νέα σελίδα (αυτόματο pNN) ?\n\n'
+          + 'OK = Νέα σελίδα (pNN),  Cancel = Ακύρωση.';
+  var ok = window.confirm(msg);
+  if (!ok) return { proceed:false, name:name, bumped:false };
+
+  var bumped = nextPageNameForToken(name, existArr);
+  return { proceed:true, name:bumped, bumped:true };
+}
+
+/* ---------- AUTOPSY PANEL FUNCTIONALITY ---------- */
+function initAutopsyPanel() {
+  const smartToggle = document.getElementById('smartToggle');
+  const smartPointsWrap = document.getElementById('smartPointsWrap');
+  const axHoma = document.getElementById('ax_homa');
+  const axHomaLvlWrap = document.getElementById('ax_homa_lvl_wrap');
+  
+  // Smart Readiness toggle
+  if (smartToggle) {
+    smartToggle.addEventListener('click', function(e) {
+      if (e.target.classList.contains('badge')) {
+        // Remove active class from all
+        smartToggle.querySelectorAll('.badge').forEach(b => b.classList.remove('active'));
+        // Add active to clicked
+        e.target.classList.add('active');
+        
+        // Show/hide smart points
+        const isYes = e.target.dataset.value === 'ΝΑΙ';
+        smartPointsWrap.style.display = isYes ? 'block' : 'none';
+      }
+    });
+  }
+  
+  // Χωματουργικό toggle
+  if (axHoma) {
+    axHoma.addEventListener('change', function() {
+      axHomaLvlWrap.style.display = this.value === 'ΝΑΙ' ? 'inline-block' : 'none';
+    });
+  }
+  
+  // Αποστολή στο Sheet
+  const axSyncSheet = document.getElementById('ax_sync_sheet');
+  const axSyncResult = document.getElementById('ax_sync_result');
+  
+  if (axSyncSheet) {
+    axSyncSheet.addEventListener('click', function() {
+      if (!state.job || !state.job.srFolderName) {
+        axSyncResult.textContent = 'Διάλεξε SR πρώτα';
+        return;
+      }
+      
+      const smartToggleActive = document.querySelector('#smartToggle .badge.active');
+      const smartPoints = [];
+      document.querySelectorAll('#smartPointsWrap input[type="checkbox"]:checked').forEach(chk => {
+        smartPoints.push(chk.dataset.sp);
+      });
+      
+      const payload = {
+        action: 'updateAutopsia',
+        sr: state.job.srFolderName,
+        dig: document.getElementById('ax_homa').value,
+        dig_lvl: document.getElementById('ax_homa_lvl').value,
+        smart_readiness: smartToggleActive ? smartToggleActive.dataset.value : 'ΟΧΙ',
+        smart_points: smartPoints,
+        route_type: document.getElementById('ax_route_type').value,
+        const_lvl: document.getElementById('ax_katas_lvl').value,
+        bep_floor: document.getElementById('ax_bep_floor').value,
+        levels: document.getElementById('ax_levels').value,
+        status: document.getElementById('ax_status').value
+      };
+      
+      axSyncResult.textContent = 'Αποστολή...';
+      
+      fetch(WEBAPP_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(j => {
+        axSyncResult.textContent = j.ok ? '✅ Αποστολή επιτυχής' : '❌ Σφάλμα';
+      })
+      .catch(err => {
+        console.error(err);
+        axSyncResult.textContent = '❌ Σφάλμα αποστολής';
+      });
+    });
+  }
+}
+
+function boot(){
+  paintFloors();
+  paintSmart();
+  renderModules();
+  renderChecklist();
+  renderGallery();
+  initAutopsyPanel();
+}
+boot();
+
+})();
+});
+</script>
+
+<style>
+
+
+#de-pending-panel{position:fixed;right:14px;bottom:70px;z-index:9998;width:min(92vw,420px);max-height:60vh;overflow:auto;background:#fff;border:1px solid var(--line,#e5e7eb);border-radius:16px;box-shadow:0 12px 28px rgba(2,6,23,.18);padding:10px;display:none}
+#de-pending-panel h3{margin:6px 0 8px;font-size:14px;font-weight:900}
+#de-pending-list{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+#de-pending-list .name{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#de-pending-list .stat{font-size:12px;opacity:.7;text-align:right}
+#de-pending-panel .actions{display:flex;gap:8px;margin-top:8px}
+.btn-lite{padding:8px 10px;border-radius:12px;border:1px solid var(--line,#e5e7eb);background:#fff;font-weight:700}
+.btn-primary{padding:8px 10px;border-radius:12px;background:var(--pill,#0f172a);color:var(--pillText,#fff);border:1px solid var(--pill,#0f172a);font-weight:900}
+</style>
+<div id="de-pending-panel">
+  <h3>Εκκρεμή αρχεία για ανέβασμα</h3>
+  <div id="de-pending-list"></div>
+  <div class="actions">
+    <button id="de-retry-all" class="btn-primary">🔁 Επαναπροσπάθεια</button>
+    <button id="de-clear-uploaded" class="btn-lite">🧹 Καθάρισε ανεβασμένα</button>
+    <button id="de-close" class="btn-lite">✖ Κλείσιμο</button>
+  </div>
+</div>
+<script>
+(function(){
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist().catch(()=>{}); });
+  }
+
+  const DB = { name:'DEPhotos', store:'files', version:1 };
+  function idbOpen(){ return new Promise((res,rej)=>{
+    const r = indexedDB.open(DB.name, DB.version);
+    r.onupgradeneeded = ()=>{ const db=r.result; if(!db.objectStoreNames.contains(DB.store)) db.createObjectStore(DB.store,{keyPath:'id'}); };
+    r.onsuccess = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+  });}
+  function idbPut(obj){ return idbOpen().then(db=>new Promise((res,rej)=>{
+    const tx=db.transaction(DB.store,'readwrite'); tx.objectStore(DB.store).put(obj);
+    tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error);
+  }));}
+  function idbGetAll(){ return idbOpen().then(db=>new Promise((res,rej)=>{
+    const tx=db.transaction(DB.store,'readonly'); const q=tx.objectStore(DB.store).getAll();
+    q.onsuccess=()=>res(q.result||[]); q.onerror=()=>rej(q.error);
+  }));}
+  function idbDelete(id){ return idbOpen().then(db=>new Promise((res,rej)=>{
+    const tx=db.transaction(DB.store,'readwrite'); tx.objectStore(DB.store).delete(id);
+    tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error);
+  }));}
+
+  async function backupSelectedFiles(files){
+    const sr = (window.state?.sr || document.querySelector('#srInput')?.value || '').trim();
+    const role = (window.state?.role || '').trim();
+    const moduleName = (window.state?.module || '').trim();
+    const when = Date.now();
+    for (const f of files){
+      const id = `${when}_${Math.random().toString(36).slice(2,7)}`;
+      const meta = { filename: f.name || `file_${id}`, type: f.type || 'application/octet-stream', size: f.size||0, sr, role, module: moduleName, addedAt: new Date().toISOString() };
+      const blob = f instanceof Blob ? f : new Blob([f], {type: meta.type});
+      await idbPut({ id, blob, meta, uploaded:false, tries:0 });
+    }
+    refreshPendingUI();
+  }
+
+  function hookFileInputs(){
+    document.querySelectorAll('input[type=file]').forEach(inp=>{
+      if (inp._deHooked) return;
+      inp._deHooked = true;
+      inp.addEventListener('change', ()=>{
+        const files = Array.from(inp.files||[]);
+        if (files.length) backupSelectedFiles(files);
+      });
+    });
+  }
+
+  let uploading=false;
+  async function processQueue(){
+    if(uploading) return; uploading=true;
+    try{
+      const all=await idbGetAll();
+      const pending=all.filter(x=>!x.uploaded);
+      for(const item of pending){
+        try{
+          await uploadOne(item);
+          item.uploaded=true; await idbPut(item);
+        }catch(err){
+          item.tries=(item.tries||0)+1; await idbPut(item);
+          await new Promise(r=>setTimeout(r,1200));
+        }
+      }
+    }finally{ uploading=false; refreshPendingUI(); }
+  }
+
+  async function uploadOne(item){
+    const url = window.WEBAPP_URL || '';
+    if(!url) throw new Error('WEBAPP_URL not defined');
+    const isVideo = (item.blob.type||'').startsWith('video/');
+    if(isVideo && item.blob.size > 50*1024*1024) throw new Error('Video >50MB — enable resumable/compress');
+
+    const fd=new FormData();
+    fd.append('file', item.blob, item.meta?.filename || 'file');
+    if(item.meta?.sr) fd.append('sr', item.meta.sr);
+    if(item.meta?.role) fd.append('role', item.meta.role);
+    if(item.meta?.module) fd.append('module', item.meta.module);
+
+    const r=await fetch(url,{method:'POST',body:fd});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    try{ const j=await r.json(); if(j && j.ok===false) throw new Error(j.error||'server'); }catch(_){}
+  }
+
+  async function refreshPendingUI(){
+    const list=document.getElementById('de-pending-list'); if(!list) return;
+    const all=await idbGetAll(); list.innerHTML='';
+    all.forEach(item=>{
+      const name=document.createElement('div'); name.className='name';
+      name.textContent=`${item.meta?.filename || item.id} · ${item.meta?.sr||''}`;
+      const stat=document.createElement('div'); stat.className='stat';
+      stat.textContent=item.uploaded ? '🟢 OK' : `🟡 tries:${item.tries||0}`;
+      list.appendChild(name); list.appendChild(stat);
+    });
+  }
+
+  async function exportAllPhotos(){
+    const all=await idbGetAll();
+    if(!all.length){ alert('Δεν υπάρχουν φωτογραφίες για εξαγωγή.'); return; }
+    const zip = new JSZip();
+    for (const item of all){
+      const fname = item.meta?.filename || (item.id + (item.blob.type.includes('jpeg')?'.jpg':''));
+      zip.file(fname, item.blob);
+    }
+    const blob=await zip.generateAsync({type:'blob'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=`DEPhotos_${new Date().toISOString().slice(0,10)}.zip`; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 30000);
+  }
+
+  async function clearUploaded(){
+    const all=await idbGetAll();
+    for(const item of all){ if(item.uploaded) await idbDelete(item.id); }
+    refreshPendingUI();
+  }
+
+  function initFloatingUI(){
+    const btnP = null;const panel=document.getElementById('de-pending-panel');
+    const close=document.getElementById('de-close');
+    const retry=document.getElementById('de-retry-all');
+    const clear=document.getElementById('de-clear-uploaded');
+
+    if(btnP && panel){ btnP.addEventListener('click', ()=>{ panel.style.display=(panel.style.display==='block'?'none':'block'); refreshPendingUI(); }); }
+    if(null){ null.addEventListener('click', exportAllPhotos); }
+    if(close && panel){ close.addEventListener('click', ()=> panel.style.display='none'); }
+    if(retry){ retry.addEventListener('click', processQueue); }
+    if(clear){ clear.addEventListener('click', clearUploaded); }
+  }
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    hookFileInputs(); initFloatingUI(); refreshPendingUI(); processQueue();
+  });
+  new MutationObserver(hookFileInputs).observe(document.documentElement,{subtree:true,childList:true});
+  setInterval(processQueue, 10000);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') processQueue(); });
+})();
+</script>
+
+
+<style>
+#de-compress-toggle{position:fixed;right:14px;bottom:130px;z-index:9999;display:flex;align-items:center;gap:8px;
+  background:#fff;border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:8px 10px;box-shadow:0 10px 18px rgba(2,6,23,.08);font-weight:700}
+#de-compress-progress{position:fixed;left:14px;bottom:14px;z-index:9999;display:none;background:#fff;
+  border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:8px 10px;box-shadow:0 10px 18px rgba(2,6,23,.08);min-width:240px}
+#de-compress-progress .bar{height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:6px}
+#de-compress-progress .bar i{display:block;height:100%;width:0%;;background:var(--pill,#0f172a)}
+</style>
+<div id="de-compress-progress">
+  <div id="de-compress-msg" style="font-size:12px;font-weight:700">Συμπίεση βίντεο…</div>
+  <div class="bar"><i id="de-compress-bar"></i></div>
+</div>
+
+
+<script>
+// v6.22 — Client-side video compression with ffmpeg.wasm (720p/30fps ~3Mbps)
+(function(){
+  const MB = 1024*1024;
+  const LIMIT_DIRECT = 150*MB;  // <= 150MB -> upload as is
+  const APPSCRIPT_LIMIT = 50*MB; // informational: Apps Script often fails >50MB
+  const TRY_COMPRESS_FROM = 150*MB;  // >150MB -> try compress
+  const TOO_BIG_RESUMABLE = 800*MB;  // >800MB -> suggest resumable
+
+  const $toggle = document.getElementById('de-compress-check');
+  const $panel  = document.getElementById('de-compress-progress');
+  const $msg    = document.getElementById('de-compress-msg');
+  const $bar    = document.getElementById('de-compress-bar');
+
+  function showProgress(text, pct){
+    if(!$panel) return;
+    $panel.style.display='block';
+    if($msg) $msg.textContent = text || 'Συμπίεση…';
+    if($bar) $bar.style.width = (pct||0)+'%';
+  }
+  function hideProgress(){
+    if($panel) $panel.style.display='none';
+    if($bar) $bar.style.width = '0%';
+  }
+
+  async function compressVideoIfNeeded(blob){
+    try{
+      const size = blob.size || 0;
+      const doCompress = $toggle ? $toggle.checked : true;
+
+      if(!doCompress || size <= TRY_COMPRESS_FROM){
+        return { blob, note: 'no_compress' };
+      }
+
+      // For extremely large files, still try but warn later if it fails
+      await window.__ffmpegLoader?.();
+
+      if(!window.FFmpeg){ throw new Error('FFmpeg not available'); }
+      // Create ffmpeg instance
+      const { createFFmpeg } = FFmpeg;
+      const ffmpeg = createFFmpeg({ log: false, corePath: undefined });
+
+      showProgress('Φόρτωση ffmpeg…', 5);
+      if(!ffmpeg.isLoaded()){
+        await ffmpeg.load();
+      }
+
+      // Read input blob
+      const inputName = 'input.mp4';
+      const outputName = 'output.mp4';
+      const buf = await blob.arrayBuffer();
+      ffmpeg.FS('writeFile', inputName, new Uint8Array(buf));
+
+      // Hook progress
+      let last = 0;
+      ffmpeg.setProgress(({ ratio })=>{
+        const pct = Math.max(5, Math.round(ratio*100));
+        if(pct - last >= 1){
+          last = pct;
+          showProgress('Συμπίεση βίντεο… '+pct+'%', pct);
+        }
+      });
+
+      // Encode (720p, 30fps, ~3M video, 96k audio)
+      // -vf scale=-2:720 keeps aspect (width divisible by 2)
+      await ffmpeg.run(
+        '-i', inputName,
+        '-vf', 'scale=-2:720', '-r', '30',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', '3M',
+        '-movflags', 'faststart',
+        '-c:a', 'aac', '-b:a', '96k',
+        outputName
+      );
+
+      const data = ffmpeg.FS('readFile', outputName);
+      const outBlob = new Blob([data.buffer], { type: 'video/mp4' });
+      hideProgress();
+
+      // If output didn't reduce sufficiently, keep the smaller one
+      if (outBlob.size < blob.size) {
+        return { blob: outBlob, note: 'compressed' };
+      } else {
+        return { blob, note: 'compress_not_smaller' };
+      }
+    }catch(e){
+      hideProgress();
+      return { blob, error: e.message || String(e) };
+    }
+  }
+
+  // Patch into global uploadOne from v6.21 (wrap)
+  if (typeof uploadOne === 'function'){
+    const originalUploadOne = uploadOne;
+    window.uploadOne = async function(item){
+      const isVideo = (item.blob.type||'').startsWith('video/');
+      try{
+        if(isVideo){
+          const size = item.blob.size||0;
+          if(size > TOO_BIG_RESUMABLE){
+            // Try compress anyway
+            const res = await compressVideoIfNeeded(item.blob);
+            if(res.error){
+              throw new Error('Μεγάλο βίντεο, απέτυχε η συμπίεση: '+res.error);
+            }
+            item.blob = res.blob;
+          }else if(size > TRY_COMPRESS_FROM){
+            const res = await compressVideoIfNeeded(item.blob);
+            if(!res.error && res.blob && res.blob.size < item.blob.size){
+              item.blob = res.blob;
+            }
+            // if compression fails or not smaller, proceed as-is (will likely fail on Apps Script if >50MB)
+          }
+        }
+        return await originalUploadOne(item);
+      }catch(err){
+        // Keep item pending; surface user-friendly error
+        const msg = (''+err.message||err).toLowerCase();
+        if(isVideo && (item.blob.size||0) > (50*1024*1024)){
+          // Suggest resumable or export
+          alert('❗Το βίντεο είναι μεγάλο.\n• Δοκίμασε Συμπίεση (ενεργό toggle) ή\n• Εξαγωγή από το μενού "📥 Κατέβασε όλες" για χειροκίνητη μεταφορά.\nΣφάλμα: '+(err.message||err));
+        } else {
+          throw err;
+        }
+      } finally {
+        hideProgress();
+      }
+    };
+  }
+
+})();
+</script>
+
+
+<style>
+#de-settings-modal{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center}
+#de-settings-card{background:#fff;color:#0f172a;width:92%;max-width:520px;border-radius:18px;box-shadow:0 20px 48px rgba(2,6,23,.2);padding:14px 14px 16px}
+#de-settings-card h3{margin:6px 0 10px;font-size:16px}
+#de-settings-card .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#de-settings-card label{font-size:12px;font-weight:700}
+#de-settings-card select{width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:10px}
+#de-settings-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+#de-settings-actions button{border-radius:12px;padding:10px 14px;border:1px solid #e5e7eb;background:#fff;font-weight:800}
+#de-settings-actions .save{background:#0f172a;color:#fff;border-color:#0f172a}
+#de-compress-progress{display:none;margin-top:8px;border:1px solid #e5e7eb;border-radius:12px;padding:8px}
+#de-compress-progress .bar{height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:6px}
+#de-compress-progress .bar i{display:block;height:100%;width:0%;;background:#0f172a}
+/* bottom bar + modal tools */
+.de-bottombar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:#fff;
+  border-top:1px solid #e5e7eb;display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+.de-bottombar a, .de-bottombar button{appearance:none;-webkit-appearance:none;
+  background:#fff;border:0;padding:10px 6px;font-weight:800;color:#0f172a;text-align:center}
+.de-bottombar .item{display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;font-size:12px}
+.de-bottombar .item.active{background:#0f172a;color:#fff}
+#toolsModal{position:fixed;inset:0;z-index:10000;display:none;align-items:flex-end;justify-content:center;background:rgba(15,23,42,.45)}
+#toolsCard{width:100%;max-width:960px;background:#fff;border-top-left-radius:18px;border-top-right-radius:18px;
+  box-shadow:0 -20px 48px rgba(2,6,23,.2);padding:14px;border:1px solid #e5e7eb;border-bottom:none}
+#toolsCard h3{margin:0 0 12px 0;font-size:16px}
+#toolsList{display:flex;flex-direction:column;gap:10px}
+#toolsList button{padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;font-weight:900;text-align:left}
+#toolsClose{display:block;margin:10px auto 0 auto;border:1px solid #e5e7eb;background:#fff;border-radius:12px;padding:10px 14px;font-weight:800}
+body{padding-bottom:64px}
+@media (min-width:720px){ body{padding-bottom:72px} }
+</style>
+<div id="de-settings-modal">
+  <div id="de-settings-card">
+    <h3>Ρυθμίσεις ποιότητας</h3>
+    <div class="row">
+      <div>
+        <label>📷 Μέγιστη πλευρά φωτογραφίας (px)</label>
+        <select id="de-photo-edge">
+          <option value="800">800</option>
+          <option value="1080">1080</option>
+          <option value="1200">1200</option>
+          <option value="1600" selected>1600</option>
+        </select>
+      </div>
+      <div>
+        <label>📦 Στόχος μεγέθους (KB)</label>
+        <select id="de-photo-target">
+          <option value="300">300</option>
+          <option value="350">350</option>
+          <option value="400" selected>400</option>
+          <option value="450">450</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div>
+        <label>🎥 Ανάλυση βίντεο</label>
+        <select id="de-video-res">
+          <option value="720" selected>720p</option>
+          <option value="1080">1080p</option>
+        </select>
+      </div>
+      <div>
+        <label>🎞️ Συμπίεση βίντεο πριν το upload</label>
+        <select id="de-video-compress">
+          <option value="on" selected>Ενεργή</option>
+          <option value="off">Ανενεργή</option>
+        </select>
+      </div>
+    </div>
+    <div id="de-compress-progress">
+      <div id="de-compress-msg" style="font-size:12px;font-weight:700">Συμπίεση βίντεο…</div>
+      <div class="bar"><i id="de-compress-bar"></i></div>
+    </div>
+    <div id="de-settings-actions">
+      <button class="save" id="de-settings-save">Αποθήκευση</button>
+      <button id="de-settings-cancel">Κλείσιμο</button>
+    </div>
+  </div>
+</div>
+<nav class="de-bottombar" id="deBottomBar">
+  <button class="item" id="navHome" type="button">🏠<span>Αρχική</span></button>
+  <button class="item" id="navStruct" type="button">🏢<span>Δομή</span></button>
+  <button class="item" id="navGallery" type="button">🌄<span>Συλλογή</span></button>
+  <button class="item" id="navSync" type="button">🔄<span>Συγχρονισμός</span></button>
+  <button class="item" id="navTools" type="button">🧰<span>Εργαλεία</span></button>
+</nav>
+<div id="toolsModal" role="dialog" aria-modal="true" aria-label="Εργαλεία">
+  <div id="toolsCard">
+    <h3>Εργαλεία</h3>
+    <div id="toolsList">
+      <button id="toolSettings">⚙️ Ρυθμίσεις</button>
+      <button id="toolPending">🕓 Εκκρεμή</button>
+      <button id="toolDownloadAll">⬇️ Κατέβασε όλες</button>
+    </div>
+    <button id="toolsClose">Κλείσιμο</button>
+  </div>
+</div>
+
+
+<script>
+(function(){
+  const qs = s=>document.querySelector(s);
+  const $modal = qs('#de-settings-modal');
+  const $edge = qs('#de-photo-edge');
+  const $target = qs('#de-photo-target');
+  const $vres = qs('#de-video-res');
+  const $vcomp = qs('#de-video-compress');
+  const $save = qs('#de-settings-save');
+  const $cancel = qs('#de-settings-cancel');
+
+  const SKEY = 'de_settings_v1';
+  const def = { edge:1600, target:400, vres:720, vcomp:'on' };
+  function load(){ try { return Object.assign({}, def, JSON.parse(localStorage.getItem(SKEY)||'{}')); } catch(e){ return def; } }
+  function save(v){ localStorage.setItem(SKEY, JSON.stringify(v)); }
+  function applyUI(v){ if($edge) $edge.value=String(v.edge); if($target) $target.value=String(v.target); if($vres) $vres.value=String(v.vres); if($vcomp) $vcomp.value=v.vcomp; }
+
+  const st = load(); applyUI(st);
+  $cancel && $cancel.addEventListener('click', ()=>{ $modal.style.display='none'; });
+  $save && $save.addEventListener('click', ()=>{
+    const v = { edge:parseInt($edge.value,10), target:parseInt($target.value,10), vres:parseInt($vres.value,10), vcomp:$vcomp.value };
+    save(v);
+    $modal.style.display='none';
+    try{ (window.showToast||alert)('✔️ Αποθηκεύτηκαν οι ρυθμίσεις'); }catch(e){}
+  });
+
+  // Bottom-bar Tools modal
+  const $tools = document.getElementById('navTools');
+  const $tModal = document.getElementById('toolsModal');
+  const $close = document.getElementById('toolsClose');
+  function openTools(){ $tModal.style.display='flex'; }
+  function closeTools(){ $tModal.style.display='none'; }
+  $tools && $tools.addEventListener('click', openTools);
+  $close && $close.addEventListener('click', closeTools);
+  $tModal && $tModal.addEventListener('click', (e)=>{ if(e.target === $tModal) closeTools(); });
+
+  document.getElementById('toolSettings')?.addEventListener('click', ()=>{
+    closeTools();
+    const m = document.getElementById('de-settings-modal');
+    if(m){ applyUI(load()); m.style.display='flex'; } else { alert('Δεν βρέθηκαν Ρυθμίσεις.'); }
+  });
+  document.getElementById('toolPending')?.addEventListener('click', ()=>{
+    closeTools();
+    const sel = '#de-pending-panel, #pendingPanel, [data-pending-list], .pending-list, .uploadQueue, .queue';
+    const el = document.querySelector(sel);
+    if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); } else { alert('Δεν βρέθηκε λίστα εκκρεμών.'); }
+  });
+  document.getElementById('toolDownloadAll')?.addEventListener('click', async()=>{
+    closeTools();
+    const cands = [window.exportAllZip, window.downloadAllLocal, window.exportAll];
+    for(const fn of cands){ if(typeof fn==='function'){ try{ await fn(); return; }catch(e){} } }
+    alert('Η λειτουργία "Κατέβασε όλες" δεν είναι διαθέσιμη στην παρούσα έκδοση.');
+  });
+
+  // Photo resize before upload, if uploadOne exists
+  async function resizePhotoBlob(blob){
+    const s = load();
+    const maxEdge = s.edge||1600;
+    const targetKB = s.target||400;
+    const createBmp = (window.createImageBitmap ? window.createImageBitmap : (file)=>new Promise((resolve,reject)=>{
+      const img = new Image(); img.onload=()=>resolve(img); img.onerror=reject;
+      img.src = URL.createObjectURL(file);
+    }));
+    const img = await createBmp(blob).catch(()=>null);
+    if(!img) return blob;
+    const width = img.width, height = img.height;
+    const scale = Math.min(1, maxEdge/Math.max(width,height));
+    const outW = Math.max(1, Math.round(width*scale));
+    const outH = Math.max(1, Math.round(height*scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = outW; canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, outW, outH);
+
+    let low=0.5, high=0.95, best=null;
+    for(let i=0;i<8;i++){
+      const q=(low+high)/2;
+      const b=await new Promise(r=>canvas.toBlob(r,'image/jpeg',q));
+      const kb=Math.ceil((b.size||0)/1024);
+      best=b;
+      if(kb > Math.max(500, targetKB)) high=q; else low=q;
+    }
+    return best || blob;
+  }
+
+  if (typeof uploadOne === 'function'){
+    const _u1 = uploadOne;
+    window.uploadOne = async function(item){
+      try{
+        const type = (item.blob?.type||'');
+        if(type.startsWith('image/')){
+          item.blob = await resizePhotoBlob(item.blob);
+        }else if(type.startsWith('video/')){
+          const s2 = load();
+          window.__DE_VIDEO_TARGET_RES__ = s2.vres||720;
+          window.__DE_VIDEO_SHOULD_COMPRESS__ = s2.vcomp !== 'off';
+        }
+      }catch(e){ console.warn('resize/compress prep error', e); }
+      return await _u1(item);
+    };
+  }
+
+  // Minimal compressor hooks (used by ffmpeg wasm patch in v6.22)
+  (function patchCompressorUI(){
+    if(!document.getElementById('de-compress-progress')){
+      const area = document.body;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = '<div id="de-compress-progress" style="display:none;margin:8px;border:1px solid #e5e7eb;border-radius:12px;padding:8px">'+
+        '<div id="de-compress-msg" style="font-size:12px;font-weight:700">Συμπίεση βίντεο…</div>'+
+        '<div class="bar" style="height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:6px"><i id="de-compress-bar" style="display:block;height:100%;width:0%;background:#0f172a"></i></div>'+
+      '</div>';
+      area.appendChild(wrap.firstChild);
+    }
+    const panel  = document.getElementById('de-compress-progress');
+    const msg    = document.getElementById('de-compress-msg');
+    const bar    = document.getElementById('de-compress-bar');
+    window.__DE_COMPRESS_UI__ = {
+      showProgress(text, pct){ panel.style.display='block'; if(msg) msg.textContent = text||'Συμπίεση…'; if(bar) bar.style.width=(pct||0)+'%'; },
+      hideProgress(){ panel.style.display='none'; if(bar) bar.style.width='0%'; }
+    };
+  })();
+
+  window.__DE_VIDEO_SETTINGS__ = {
+    shouldCompress(){ const s=load(); return (s.vcomp!=='off'); },
+    targetRes(){ const s=load(); return s.vres||720; }
+  };
+})();
+</script>
+
+
+<script>
+// Wire bottom bar nav to existing tabs/sections (defensive)
+(function(){
+  function $(s,root){return (root||document).querySelector(s)}
+  function $all(s,root){return Array.from((root||document).querySelectorAll(s))}
+  function findTabByText(txt){
+    const cands = $all('.tabs .tab, .tab, nav .tablink, button.tab, a.tab');
+    const t = (txt||'').toLowerCase();
+    return cands.find(el => (el.textContent||'').toLowerCase().includes(t)) || null;
+  }
+  function activateByIdList(ids){
+    for(const id of ids){
+      const el = id && $(id);
+      if(el){ el.scrollIntoView({behavior:'smooth', block:'start'}); return true; }
+    }
+    return false;
+  }
+  function showSectionFallback(keys){
+    // Common containers used in our app
+    const map = {
+      home: ['#home','#homeSection','#start','#main'],
+      struct: ['#structure','#structurePanel','#structureWrap','#bepStructure','#modulesStructure'],
+      gallery: ['#gallery','#galleryPanel','#galleryWrap','#collect','#upload','#collection'],
+      sync: ['#page-sync','[data-page="#/sync"]','#sync','#pageSync']
+    };
+    for(const k of keys){
+      if(activateByIdList(map[k]||[])) return true;
+    }
+    return false;
+  }
+  function clickOrFallback(label, keys){
+    // 1) try clicking an existing tab/link with matching text
+    const t = findTabByText(label);
+    if(t){ t.click(); return true; }
+    // 2) try events on data-tab
+    const dt = $(`[data-tab*="${label}"]`);
+    if(dt){ dt.click(); return true; }
+    // 3) show known section ids
+    return showSectionFallback(keys);
+  }
+  const homeBtn = $('#navHome');
+  const structBtn = $('#navStruct');
+  const galleryBtn = $('#navGallery');
+  const toolsBtn = $('#navTools');
+  function setActive(btn){
+    document.querySelectorAll('.de-bottombar .item').forEach(b=>b.classList.remove('active'));
+    btn && btn.classList.add('active');
+  }
+  homeBtn && homeBtn.addEventListener('click', ()=>{
+    const ok = clickOrFallback('Αρχική',['home']);
+    setActive(homeBtn);
+    if(!ok) console.warn('BottomNav: Δεν βρέθηκε στόχος για Αρχική.');
+  });
+  structBtn && structBtn.addEventListener('click', ()=>{
+    const ok = clickOrFallback('Δομή',['struct']);
+    setActive(structBtn);
+    if(!ok) console.warn('BottomNav: Δεν βρέθηκε στόχος για Δομή.');
+  });
+  galleryBtn && galleryBtn.addEventListener('click', ()=>{
+    const ok = clickOrFallback('Συλλογή',['gallery']);
+    setActive(galleryBtn);
+    if(!ok) console.warn('BottomNav: Δεν βρέθηκε στόχος για Συλλογή.');
+  });
+  toolsBtn && toolsBtn.addEventListener('click', ()=> setActive(toolsBtn));
+})();
+</script>
+
+
+<!-- Tools Panel & Sheet -->
+<style>
+#panel-tools{display:none}
+#panel-tools .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#panel-tools .grid button{padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;font-weight:900}
+@media (max-width:460px){#panel-tools .grid{grid-template-columns:1fr}}
+#toolsSheet{position:fixed;left:0;right:0;bottom:0;display:none;z-index:10050}
+#toolsSheet .sheet{margin:0 auto;max-width:960px;background:#fff;border-top-left-radius:18px;border-top-right-radius:18px;box-shadow:0 -20px 48px rgba(2,6,23,.2);padding:14px;border:1px solid #e5e7eb;border-bottom:none}
+#toolsBackdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;z-index:10040}
+</style>
+<section class="card" id="panel-tools">
+  <div class="title">🧰 <div>Εργαλεία</div></div>
+  <div class="grid" style="margin-top:10px">
+    <button id="tool-open-settings">⚙️ Ρυθμίσεις</button>
+    <button id="tool-toggle-pending">🟡 Εκκρεμή</button>
+    <button id="tool-export-zip">⬇️ Κατέβασε όλες</button>
+  </div>
+</section>
+<div id="toolsBackdrop"></div>
+<div id="toolsSheet" role="dialog" aria-modal="true" aria-label="Εργαλεία">
+  <div class="sheet">
+    <h3 style="margin:0 0 12px 0">Εργαλεία</h3>
+    <div style="display:grid;gap:10px">
+      <button id="sht-settings" class="btn">⚙️ Ρυθμίσεις</button>
+      <button id="sht-pending" class="btn">🟡 Εκκρεμή</button>
+      <button id="sht-zip" class="btn">⬇️ Κατέβασε όλες</button>
+      <button id="sht-close" class="btn">Κλείσιμο</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+async function exportAllZip(){
+  try{
+    const items = (window.state && Array.isArray(window.state.items)) ? window.state.items : [];
+    if (!items.length){ alert('Δεν υπάρχουν αρχεία στη λίστα.'); return; }
+    if (!window.JSZip){ alert('JSZip δεν φορτώθηκε.'); return; }
+    const zip = new JSZip();
+    let count = 0;
+    for (const it of items){
+      try{
+        const name = (it && (it.name||it.fileName||('file_'+(++count))))+'';
+        const blob = it && (it.blob || it.file) || null;
+        if (blob && (blob instanceof Blob)){
+          zip.file(name, blob);
+        } else if (it && it.base64){
+          zip.file(name, it.base64.split(',').pop(), {base64:true});
+        }
+      }catch(e){ console.warn('Skip item in ZIP:', e); }
+    }
+    const content = await zip.generateAsync({type:'blob'});
+    const fileName = (window.state && window.state.job && window.state.job.srFolderName ? window.state.job.srFolderName : 'photos') + '_export.zip';
+    saveAs(content, fileName);
+  }catch(err){
+    alert('Σφάλμα στο export ZIP: ' + (err && err.message || err));
+  }
 }
 </script>
+
+
+<script>
+(function(){
+  try{
+    // Hash router for Tools
+    const toolsPanel = document.getElementById('panel-tools');
+    const toolsTab = document.getElementById('tab-tools');
+    const sheet = document.getElementById('toolsSheet');
+    const back  = document.getElementById('toolsBackdrop');
+    function openSheet(){ if(sheet) sheet.style.display='block'; if(back) back.style.display='block'; }
+    function closeSheet(){ if(sheet) sheet.style.display='none'; if(back) back.style.display='none'; }
+    function setActive(el){ document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); el && el.classList.add('active'); }
+    function handleHash(){
+      const h = location.hash||'';
+      if (h==="#/tools"){ if(toolsPanel){ toolsPanel.style.display='block'; setActive(toolsTab); } openSheet(); }
+      else { if(toolsPanel){ toolsPanel.style.display='none'; } closeSheet(); }
+    }
+    window.addEventListener('hashchange', handleHash);
+    document.addEventListener('DOMContentLoaded', handleHash);
+
+    // Bottom bar "Αρχική" → scroll to top & clear hash
+    [...document.querySelectorAll('a,button')].forEach(el=>{
+      const t=(el.textContent||'').trim();
+      if(t==='Αρχική' || el.dataset.tab==='home'){
+        el.addEventListener('click', (ev)=>{ ev.preventDefault(); document.scrollingElement?.scrollTo({top:0, behavior:'smooth'}); history.replaceState(null,'','#/'); setActive(el); });
+      }
+    });
+
+    // Tools actions (both in panel and sheet)
+    function togglePending(){
+      const p = document.getElementById('de-pending-panel');
+      if (!p){ alert('Δεν βρέθηκε panel εκκρεμών'); return; }
+      p.style.display = (p.style.display==='block'?'none':'block');
+      if (p.style.display==='block'){ p.scrollIntoView({behavior:'smooth', block:'center'}); }
+    }
+    function openSettings(){
+      const m = document.getElementById('de-settings-modal');
+      if(m) m.style.display='flex'; else alert('Δεν βρέθηκε modal ρυθμίσεων');
+    }
+    document.getElementById('tool-open-settings')?.addEventListener('click', openSettings);
+    document.getElementById('tool-toggle-pending')?.addEventListener('click', togglePending);
+    document.getElementById('tool-export-zip')?.addEventListener('click', ()=>{ if (typeof exportAllZip==='function') exportAllZip(); else alert('Λείπει exportAllZip'); });
+    document.getElementById('sht-settings')?.addEventListener('click', openSettings);
+    document.getElementById('sht-pending')?.addEventListener('click', togglePending);
+    document.getElementById('sht-zip')?.addEventListener('click', ()=>{ if (typeof exportAllZip==='function') exportAllZip(); else alert('Λείπει exportAllZip'); });
+    document.getElementById('sht-close')?.addEventListener('click', closeSheet);
+    back?.addEventListener('click', closeSheet);
+  }catch(e){ console.warn('tools init error', e); }
+})();
+</script>
+
+
+<script>
+(function(){
+  function safe(fn){ return function(){ try{ return (typeof fn==='function') ? fn() : null; }catch(e){} }; }
+  var m = document.getElementById('de-settings-modal');
+  var p = document.getElementById('de-pending-panel');
+  var zip = (typeof exportAllZip==='function') ? exportAllZip : null;
+  var el;
+  if (el=document.getElementById('toolSettings')){ el.onclick = function(){ if(m) m.style.display='flex'; }; }
+  if (el=document.getElementById('toolPending')){ el.onclick = function(){ if(p){ p.style.display = (p.style.display==='block'?'none':'block'); } }; }
+  if (el=document.getElementById('toolDownloadAll')){ el.onclick = function(){ if(zip) zip(); else alert('Η λειτουργία Κατέβασε όλες δεν είναι διαθέσιμη.'); }; }
+})();
+</script>
+
+
+<!-- Robust bottom-bar navigation binding (safe override) -->
+<script>
+(function(){
+  function $ (sel, root){ return (root||document).querySelector(sel); }
+  function $$ (sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
+  function setActive(btn){
+    $$(".de-bottombar .item").forEach(b=>b.classList.remove("active"));
+    if(btn) btn.classList.add("active");
+  }
+  function showRouteFallback(route){
+    // Fallback when no global go() exists: show [data-page=route]
+    var target = document.querySelector('[data-page="' + route + '"]');
+    if(!target) return false;
+    $("[data-page]") && $$("[data-page]").forEach(p=>p.classList.add("hidden"));
+    target.classList.remove("hidden");
+    // highlight top tabs if present
+    $$(".tab").forEach(t=>t.classList.toggle("active", t.getAttribute("data-route")===route));
+    try{ if(location.hash !== route) location.hash = route; }catch(e){}
+    try{ document.scrollingElement && document.scrollingElement.scrollTo({top:0, behavior:"smooth"}); }catch(e){}
+    return true;
+  }
+  function navigate(btn, route){
+    try{
+      if (typeof go === "function"){ go(route); }
+      else {
+        // try click on existing top tab
+        var t = document.querySelector('.tab[data-route="' + route + '"]');
+        if (t) { try{ t.click(); }catch(e){} }
+        else { showRouteFallback(route); }
+      }
+      try{ if(location.hash !== route) location.hash = route; }catch(e){}
+    }catch(e){
+      // hard fallback
+      showRouteFallback(route);
+    }
+    setActive(btn);
+  }
+  function bind(){
+    var homeBtn = document.getElementById("navHome");
+    var structBtn = document.getElementById("navStruct");
+    var galleryBtn = document.getElementById("navGallery");
+    var syncBtn = document.getElementById("navSync");
+    var toolsBtn = document.getElementById("navTools");
+    homeBtn && homeBtn.addEventListener("click", ()=> navigate(homeBtn, "#/sr"));
+    structBtn && structBtn.addEventListener("click", ()=> navigate(structBtn, "#/structure"));
+    galleryBtn && galleryBtn.addEventListener("click", ()=> navigate(galleryBtn, "#/gallery"));
+    syncBtn && syncBtn.addEventListener("click", ()=> navigate(syncBtn, "#/sync"));
+    toolsBtn && toolsBtn.addEventListener("click", ()=> setActive(toolsBtn));
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
+  else bind();
+})();
+</script>
+
+
+<!-- DE-SYNC PATCH v1: Non-destructive sync renderer -->
+<script>
+(function(){
+  var WEBAPP_URL = window.WEBAPP_URL || (window.WEBAPP && window.WEBAPP.URL) || (function(){
+    try {
+      var scripts = document.scripts || [];
+      for (var i=0;i<scripts.length;i++){
+        var t = scripts[i].textContent||'';
+        var m = t.match(/const\s+WEBAPP_URL\s*=\s*['"]([^'"]+)['"]/);
+        if(m) return m[1];
+      }
+    }catch(e){}
+    return '';
+  })();
+
+  function text(el){ return (el && (el.textContent||'')).trim(); }
+  function $(s,root){ return (root||document).querySelector(s); }
+
+  function getCurrentSRName(){
+    try{
+      if (window.state && state.job && state.job.srFolderName) return state.job.srFolderName;
+    }catch(e){}
+    var el = $("#srInfo");
+    if (el){
+      var t = text(el);
+      var i = t.indexOf("Επιλέχθηκε:");
+      if (i>-1) return t.slice(i+12).trim();
+      return t;
+    }
+    var inSR = $("#inSR") || $("#srInput");
+    if (inSR && inSR.value) return inSR.value.trim();
+    return "";
+  }
+
+  function humanSize(bytes){
+    var b = Number(bytes||0);
+    if (b<1024) return b+" B";
+    if (b<1024*1024) return (b/1024).toFixed(1)+" KB";
+    return (b/1024/1024).toFixed(1)+" MB";
+  }
+
+  function renderSyncList(srName, selector){
+    selector = selector || "#syncResults";
+    var host = document.querySelector(selector);
+    if(!host){ console.warn("DE-SYNC: host not found:", selector); return; }
+    if(!srName){ host.innerHTML = '<div class="muted">Διάλεξε SR πρώτα.</div>'; return; }
+    if(!WEBAPP_URL){ host.innerHTML = '<div class="muted">WEBAPP_URL δεν ορίστηκε στο index.</div>'; return; }
+
+    host.innerHTML = '<div class="muted">Φόρτωση...</div>';
+    fetch(WEBAPP_URL + '?action=listUploaded&sr=' + encodeURIComponent(srName) + '&t=' + Date.now())
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j || j.ok===false){
+          throw new Error((j && j.error) || "listUploaded failed");
+        }
+        var items = j.items || j.files || [];
+        if(!items.length){
+          host.innerHTML = '<div class="muted">Δεν βρέθηκαν αρχεία για "'+srName+'".</div>';
+          return;
+        }
+        function tokenOf(n){
+          var base = String(n||'').toLowerCase()
+            .replace(/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/i,'')
+            .replace(/\s+/g,'')
+            .replace(/\.p\d{2}$/i,'');
+          return base;
+        }
+        var byTok = items.reduce(function(acc, f){
+          var t = tokenOf(f.name||"");
+          (acc[t] = acc[t] || []).push(f);
+          return acc;
+        }, Object.create(null));
+
+        var tokens = Object.keys(byTok).sort(function(a,b){ return a.localeCompare(b,'el'); });
+
+        var out = [];
+        out.push('<div class="muted" style="margin:6px 0">Σύνολο: '+items.length+' αρχεία • Βήματα: '+tokens.length+'</div>');
+        tokens.forEach(function(tok){
+          var arr = byTok[tok].slice().sort(function(a,b){ return String(a.name).localeCompare(String(b.name),'el'); });
+          out.push('<div class="item" style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;margin:8px 0">');
+          out.push('<div style="display:flex;justify-content:space-between;align-items:center">');
+          out.push('<div style="font-weight:900">'+tok+'</div>');
+          out.push('<div class="badge">'+arr.length+' αρχεία</div>');
+          out.push('</div>');
+          out.push('<div class="muted" style="font-size:11px;margin-top:6px">');
+          out.push(arr.map(function(f){ return '• '+f.name+' — '+humanSize(f.size||0); }).join('<br>'));
+          out.push('</div>');
+          out.push('</div>');
+        });
+
+        host.innerHTML = out.join('');
+      })
+      .catch(function(err){
+        host.innerHTML = '<div class="muted">Σφάλμα συγχρονισμού: '+(err && err.message || err)+'</div>';
+      });
+  }
+
+  window.renderSyncList = window.renderSyncList || renderSyncList;
+
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.getElementById('btnSyncRefresh') || document.querySelector('[data-sync-refresh]');
+    if(btn){
+      btn.addEventListener('click', function(){
+        var sr = getCurrentSRName();
+        renderSyncList(sr, '#syncResults');
+      });
+    }
+    window.addEventListener('hashchange', function(){
+      var h = location.hash||'';
+      if (h === '#/sync' || h.indexOf('/sync')>-1){
+        var sr = getCurrentSRName();
+        renderSyncList(sr, '#syncResults');
+      }
+    });
+    var h0 = location.hash||'';
+    if (h0 === '#/sync' || h0.indexOf('/sync')>-1){
+      var sr0 = getCurrentSRName();
+      renderSyncList(sr0, '#syncResults');
+    }
+  });
+})();
+</script>
+<script>
+/* ===== Drive preview helpers (non-destructive) ===== */
+(function(){
+  function drivePreviewUrl(id){
+    // απευθείας προεπισκόπηση (εικόνες/βίντεο/pdf) — το Drive θα εξυπηρετήσει σωστό content-type
+    return 'https://drive.google.com/uc?id='+encodeURIComponent(id);
+  }
+  function driveOpenUrl(id){ return 'https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'; }
+
+  function extOf(name){ return String(name||'').split('.').pop().toLowerCase(); }
+  function isImageExt(e){ return ['jpg','jpeg','png','webp','gif','heic'].includes(e); }
+  function isVideoExt(e){ return ['mp4','mov','webm','mkv'].includes(e); }
+  function isPdfExt(e){ return e==='pdf'; }
+
+  const modal = document.getElementById('de-preview');
+  const closeBtn = document.getElementById('de-preview-close');
+  const body = document.getElementById('de-preview-body');
+  const title = document.getElementById('de-preview-title');
+  const openA = document.getElementById('de-preview-open');
+
+  function showPreview(item){
+    if(!item || !item.id){ return; }
+    const url = drivePreviewUrl(item.id);
+    const open = driveOpenUrl(item.id);
+    const e = extOf(item.name||'');
+    title.textContent = item.name || 'Προβολή αρχείου';
+    openA.href = open;
+
+    // καθάρισμα
+    body.innerHTML = '';
+
+    if(isImageExt(e)){
+      const img = new Image();
+      img.src = url;
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '78vh';
+      img.alt = item.name || '';
+      body.appendChild(img);
+    } else if(isVideoExt(e)){
+      const v = document.createElement('video');
+      v.controls = true; v.playsInline = true; v.src = url;
+      v.style.maxWidth = '100%'; v.style.maxHeight='78vh';
+      body.appendChild(v);
+    } else if(isPdfExt(e)){
+      const obj = document.createElement('object');
+      obj.data = url; obj.type='application/pdf';
+      obj.style.width='100%'; obj.style.height='78vh';
+      body.appendChild(obj);
+    } else {
+      const p = document.createElement('div');
+      p.style.color='#fff'; p.style.padding='16px'; p.style.textAlign='center';
+      p.innerHTML = 'Δεν υποστηρίζεται inline προεπισκόπηση για το «'+(item.name||'')+'».<br>Άνοιξέ το στο Drive.';
+      body.appendChild(p);
+    }
+
+    modal.style.display = 'flex';
+  }
+  function hidePreview(){ modal.style.display='none'; body.innerHTML=''; }
+  if(closeBtn){ closeBtn.onclick = hidePreview; }
+  if(modal){ modal.onclick = (e)=>{ if(e.target===modal) hidePreview(); }; }
+
+  // εκθέτουμε global για χρήση από renderSyncList
+  window.DE_PREVIEW = { show: showPreview, hide: hidePreview, driveOpenUrl };
+})();
+</script>
+<!-- === DRIVE PREVIEW MODAL (non-destructive) === -->
+<div id="de-preview" style="position:fixed;inset:0;display:none;z-index:99999;align-items:center;justify-content:center;background:rgba(0,0,0,.55)">
+  <div id="de-preview-card" style="background:#fff;color:#0f172a;width:92%;max-width:720px;max-height:86vh;border-radius:14px;box-shadow:0 18px 48px rgba(2,6,23,.35);overflow:hidden;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #e5e7eb">
+      <div id="de-preview-title" style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Προβολή</div>
+      <button id="de-preview-close" style="appearance:none;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;font-weight:800">Κλείσιμο</button>
+    </div>
+    <div id="de-preview-body" style="padding:0;overflow:auto;background:#0b0c0f;display:flex;align-items:center;justify-content:center;min-height:280px">
+      <!-- δυναμικό περιεχόμενο -->
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 12px;border-top:1px solid #e5e7eb;background:#fff">
+      <a id="de-preview-open" href="#" target="_blank" rel="noopener" style="text-decoration:none;border:1px solid #e5e7eb;border-radius:10px;padding:8px 12px;font-weight:800">Άνοιγμα στο Drive</a>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
