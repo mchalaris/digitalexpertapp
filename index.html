@@ -2056,5 +2056,128 @@ async function exportAllZip(){
 })();
 </script>
 
+
+<!-- DE-SYNC PATCH v1: Non-destructive sync renderer -->
+<script>
+(function(){
+  var WEBAPP_URL = window.WEBAPP_URL || (window.WEBAPP && window.WEBAPP.URL) || (function(){
+    try {
+      var scripts = document.scripts || [];
+      for (var i=0;i<scripts.length;i++){
+        var t = scripts[i].textContent||'';
+        var m = t.match(/const\s+WEBAPP_URL\s*=\s*['"]([^'"]+)['"]/);
+        if(m) return m[1];
+      }
+    }catch(e){}
+    return '';
+  })();
+
+  function text(el){ return (el && (el.textContent||'')).trim(); }
+  function $(s,root){ return (root||document).querySelector(s); }
+
+  function getCurrentSRName(){
+    try{
+      if (window.state && state.job && state.job.srFolderName) return state.job.srFolderName;
+    }catch(e){}
+    var el = $("#srInfo");
+    if (el){
+      var t = text(el);
+      var i = t.indexOf("Επιλέχθηκε:");
+      if (i>-1) return t.slice(i+12).trim();
+      return t;
+    }
+    var inSR = $("#inSR") || $("#srInput");
+    if (inSR && inSR.value) return inSR.value.trim();
+    return "";
+  }
+
+  function humanSize(bytes){
+    var b = Number(bytes||0);
+    if (b<1024) return b+" B";
+    if (b<1024*1024) return (b/1024).toFixed(1)+" KB";
+    return (b/1024/1024).toFixed(1)+" MB";
+  }
+
+  function renderSyncList(srName, selector){
+    selector = selector || "#syncResults";
+    var host = document.querySelector(selector);
+    if(!host){ console.warn("DE-SYNC: host not found:", selector); return; }
+    if(!srName){ host.innerHTML = '<div class="muted">Διάλεξε SR πρώτα.</div>'; return; }
+    if(!WEBAPP_URL){ host.innerHTML = '<div class="muted">WEBAPP_URL δεν ορίστηκε στο index.</div>'; return; }
+
+    host.innerHTML = '<div class="muted">Φόρτωση...</div>';
+    fetch(WEBAPP_URL + '?action=listUploaded&sr=' + encodeURIComponent(srName) + '&t=' + Date.now())
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j || j.ok===false){
+          throw new Error((j && j.error) || "listUploaded failed");
+        }
+        var items = j.items || j.files || [];
+        if(!items.length){
+          host.innerHTML = '<div class="muted">Δεν βρέθηκαν αρχεία για "'+srName+'".</div>';
+          return;
+        }
+        function tokenOf(n){
+          var base = String(n||'').toLowerCase()
+            .replace(/\.(jpg|jpeg|png|mp4|pdf|xls|xlsx)$/i,'')
+            .replace(/\s+/g,'')
+            .replace(/\.p\d{2}$/i,'');
+          return base;
+        }
+        var byTok = items.reduce(function(acc, f){
+          var t = tokenOf(f.name||"");
+          (acc[t] = acc[t] || []).push(f);
+          return acc;
+        }, Object.create(null));
+
+        var tokens = Object.keys(byTok).sort(function(a,b){ return a.localeCompare(b,'el'); });
+
+        var out = [];
+        out.push('<div class="muted" style="margin:6px 0">Σύνολο: '+items.length+' αρχεία • Βήματα: '+tokens.length+'</div>');
+        tokens.forEach(function(tok){
+          var arr = byTok[tok].slice().sort(function(a,b){ return String(a.name).localeCompare(String(b.name),'el'); });
+          out.push('<div class="item" style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;margin:8px 0">');
+          out.push('<div style="display:flex;justify-content:space-between;align-items:center">');
+          out.push('<div style="font-weight:900">'+tok+'</div>');
+          out.push('<div class="badge">'+arr.length+' αρχεία</div>');
+          out.push('</div>');
+          out.push('<div class="muted" style="font-size:11px;margin-top:6px">');
+          out.push(arr.map(function(f){ return '• '+f.name+' — '+humanSize(f.size||0); }).join('<br>'));
+          out.push('</div>');
+          out.push('</div>');
+        });
+
+        host.innerHTML = out.join('');
+      })
+      .catch(function(err){
+        host.innerHTML = '<div class="muted">Σφάλμα συγχρονισμού: '+(err && err.message || err)+'</div>';
+      });
+  }
+
+  window.renderSyncList = window.renderSyncList || renderSyncList;
+
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.getElementById('btnSyncRefresh') || document.querySelector('[data-sync-refresh]');
+    if(btn){
+      btn.addEventListener('click', function(){
+        var sr = getCurrentSRName();
+        renderSyncList(sr, '#syncResults');
+      });
+    }
+    window.addEventListener('hashchange', function(){
+      var h = location.hash||'';
+      if (h === '#/sync' || h.indexOf('/sync')>-1){
+        var sr = getCurrentSRName();
+        renderSyncList(sr, '#syncResults');
+      }
+    });
+    var h0 = location.hash||'';
+    if (h0 === '#/sync' || h0.indexOf('/sync')>-1){
+      var sr0 = getCurrentSRName();
+      renderSyncList(sr0, '#syncResults');
+    }
+  });
+})();
+</script>
 </body>
 </html>
