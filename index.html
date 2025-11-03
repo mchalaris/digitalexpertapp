@@ -1093,13 +1093,19 @@ function refreshSync(){
         ul.style.fontSize='11px'; 
         ul.style.marginTop='6px';
         ul.innerHTML = arr.slice(0,8).map(function(f){
-          var when = f.time ? new Date(f.time).toLocaleString() : '';
-          var meta = [];
-          if (f.tech) meta.push('Τεχνικός: '+f.tech);
-          if (f.role) meta.push('Ρόλος: '+f.role);
-          if (when)   meta.push(when);
-          return '<div>• '+f.name + (meta.length? ' — '+meta.join(' • ') : '') + '</div>';
-        }).join('') + (arr.length>8?' <div>…</div>':'');
+			var when = f.time ? new Date(f.time).toLocaleString() : '';
+			var meta = [];
+			if (f.tech) meta.push('Τεχνικός: '+f.tech);
+			if (f.role) meta.push('Ρόλος: '+f.role);
+			if (when)   meta.push(when);
+  
+			// ΠΡΟΣΘΗΚΗ PREVIEW LINK
+			const previewLink = f.id ? 
+				` <a href="#" class="preview-link" data-file-id="${f.id}" style="color:#3b82f6;text-decoration:none;font-size:10px;margin-left:4px">[👁️ Preview]</a>` : 
+    '';
+    
+				return '<div>• '+f.name + (meta.length? ' — '+meta.join(' • ') : '') + previewLink + '</div>';
+}).join('') + (arr.length>8?' <div>…</div>':'');
         box.appendChild(head); box.appendChild(ul);
         syncList.appendChild(box);
       });
@@ -1292,141 +1298,111 @@ boot();
 </div>
 <script>
 (function(){
-  if (navigator.storage && navigator.storage.persist) {
-    navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist().catch(()=>{}); });
-  }
+  // Απλοποιημένο σύστημα εκκρεμών
+  const pendingPanel = document.getElementById('de-pending-panel');
+  const pendingList = document.getElementById('de-pending-list');
+  const retryBtn = document.getElementById('de-retry-all');
+  const clearBtn = document.getElementById('de-clear-uploaded');
+  const closeBtn = document.getElementById('de-close');
 
-  const DB = { name:'DEPhotos', store:'files', version:1 };
-  function idbOpen(){ return new Promise((res,rej)=>{
-    const r = indexedDB.open(DB.name, DB.version);
-    r.onupgradeneeded = ()=>{ const db=r.result; if(!db.objectStoreNames.contains(DB.store)) db.createObjectStore(DB.store,{keyPath:'id'}); };
-    r.onsuccess = ()=>res(r.result);
-    r.onerror = ()=>rej(r.error);
-  });}
-  function idbPut(obj){ return idbOpen().then(db=>new Promise((res,rej)=>{
-    const tx=db.transaction(DB.store,'readwrite'); tx.objectStore(DB.store).put(obj);
-    tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error);
-  }));}
-  function idbGetAll(){ return idbOpen().then(db=>new Promise((res,rej)=>{
-    const tx=db.transaction(DB.store,'readonly'); const q=tx.objectStore(DB.store).getAll();
-    q.onsuccess=()=>res(q.result||[]); q.onerror=()=>rej(q.error);
-  }));}
-  function idbDelete(id){ return idbOpen().then(db=>new Promise((res,rej)=>{
-    const tx=db.transaction(DB.store,'readwrite'); tx.objectStore(DB.store).delete(id);
-    tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error);
-  }));}
+  if (!pendingPanel) return;
 
-  async function backupSelectedFiles(files){
-    const sr = (window.state?.sr || document.querySelector('#srInput')?.value || '').trim();
-    const role = (window.state?.role || '').trim();
-    const moduleName = (window.state?.module || '').trim();
-    const when = Date.now();
-    for (const f of files){
-      const id = `${when}_${Math.random().toString(36).slice(2,7)}`;
-      const meta = { filename: f.name || `file_${id}`, type: f.type || 'application/octet-stream', size: f.size||0, sr, role, module: moduleName, addedAt: new Date().toISOString() };
-      const blob = f instanceof Blob ? f : new Blob([f], {type: meta.type});
-      await idbPut({ id, blob, meta, uploaded:false, tries:0 });
+  function refreshPendingList() {
+    if (!pendingList) return;
+    
+    const pendingItems = (window.state?.items || []).filter(item => 
+      item && item.status !== 'uploaded'
+    );
+    
+    pendingList.innerHTML = '';
+    
+    if (pendingItems.length === 0) {
+      pendingList.innerHTML = '<div class="muted">Δεν υπάρχουν εκκρεμή αρχεία</div>';
+      return;
     }
-    refreshPendingUI();
-  }
-
-  function hookFileInputs(){
-    document.querySelectorAll('input[type=file]').forEach(inp=>{
-      if (inp._deHooked) return;
-      inp._deHooked = true;
-      inp.addEventListener('change', ()=>{
-        const files = Array.from(inp.files||[]);
-        if (files.length) backupSelectedFiles(files);
-      });
+    
+    pendingItems.forEach(item => {
+      const row = document.createElement('div');
+      row.style.display = 'grid';
+      row.style.gridTemplateColumns = '1fr auto';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+      row.style.padding = '4px 0';
+      
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'name';
+      nameDiv.textContent = item.name || 'Unnamed file';
+      nameDiv.style.fontSize = '12px';
+      nameDiv.style.whiteSpace = 'nowrap';
+      nameDiv.style.overflow = 'hidden';
+      nameDiv.style.textOverflow = 'ellipsis';
+      
+      const statusDiv = document.createElement('div');
+      statusDiv.className = 'stat';
+      statusDiv.textContent = item.status === 'error' ? '⛔ Error' : '🟡 Pending';
+      statusDiv.style.fontSize = '12px';
+      statusDiv.style.opacity = '0.7';
+      statusDiv.style.textAlign = 'right';
+      
+      row.appendChild(nameDiv);
+      row.appendChild(statusDiv);
+      pendingList.appendChild(row);
     });
   }
 
-  let uploading=false;
-  async function processQueue(){
-    if(uploading) return; uploading=true;
-    try{
-      const all=await idbGetAll();
-      const pending=all.filter(x=>!x.uploaded);
-      for(const item of pending){
-        try{
-          await uploadOne(item);
-          item.uploaded=true; await idbPut(item);
-        }catch(err){
-          item.tries=(item.tries||0)+1; await idbPut(item);
-          await new Promise(r=>setTimeout(r,1200));
+  // Event listeners
+  if (retryBtn) {
+    retryBtn.addEventListener('click', function() {
+      if (window.state && window.state.items) {
+        // Επαναφορά όλων των error/pending items
+        window.state.items.forEach(item => {
+          if (item.status === 'error' || item.status === 'pending') {
+            item.status = 'pending';
+            item.tries = 0;
+          }
+        });
+        refreshPendingList();
+        
+        // Εκκίνηση upload
+        if (typeof startUpload === 'function') {
+          startUpload();
+        } else if (btnUploadAll) {
+          btnUploadAll.click();
         }
       }
-    }finally{ uploading=false; refreshPendingUI(); }
-  }
-
-  async function uploadOne(item){
-    const url = window.WEBAPP_URL || '';
-    if(!url) throw new Error('WEBAPP_URL not defined');
-    const isVideo = (item.blob.type||'').startsWith('video/');
-    if(isVideo && item.blob.size > 50*1024*1024) throw new Error('Video >50MB — enable resumable/compress');
-
-    const fd=new FormData();
-    fd.append('file', item.blob, item.meta?.filename || 'file');
-    if(item.meta?.sr) fd.append('sr', item.meta.sr);
-    if(item.meta?.role) fd.append('role', item.meta.role);
-    if(item.meta?.module) fd.append('module', item.meta.module);
-
-    const r=await fetch(url,{method:'POST',body:fd});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    try{ const j=await r.json(); if(j && j.ok===false) throw new Error(j.error||'server'); }catch(_){}
-  }
-
-  async function refreshPendingUI(){
-    const list=document.getElementById('de-pending-list'); if(!list) return;
-    const all=await idbGetAll(); list.innerHTML='';
-    all.forEach(item=>{
-      const name=document.createElement('div'); name.className='name';
-      name.textContent=`${item.meta?.filename || item.id} · ${item.meta?.sr||''}`;
-      const stat=document.createElement('div'); stat.className='stat';
-      stat.textContent=item.uploaded ? '🟢 OK' : `🟡 tries:${item.tries||0}`;
-      list.appendChild(name); list.appendChild(stat);
     });
   }
 
-  async function exportAllPhotos(){
-    const all=await idbGetAll();
-    if(!all.length){ alert('Δεν υπάρχουν φωτογραφίες για εξαγωγή.'); return; }
-    const zip = new JSZip();
-    for (const item of all){
-      const fname = item.meta?.filename || (item.id + (item.blob.type.includes('jpeg')?'.jpg':''));
-      zip.file(fname, item.blob);
-    }
-    const blob=await zip.generateAsync({type:'blob'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-    a.download=`DEPhotos_${new Date().toISOString().slice(0,10)}.zip`; a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href), 30000);
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function() {
+      if (window.state && window.state.items && confirm('Είστε σίγουρος ότι θέλετε να διαγράψετε τα ανεβασμένα αρχεία από τη λίστα;')) {
+        // Διατήρηση μόνο των μη ανεβασμένων
+        window.state.items = window.state.items.filter(item => 
+          item && item.status !== 'uploaded'
+        );
+        refreshPendingList();
+        if (typeof renderGallery === 'function') renderGallery();
+      }
+    });
   }
 
-  async function clearUploaded(){
-    const all=await idbGetAll();
-    for(const item of all){ if(item.uploaded) await idbDelete(item.id); }
-    refreshPendingUI();
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function() {
+      pendingPanel.style.display = 'none';
+    });
   }
 
-  function initFloatingUI(){
-    const btnP = null;const panel=document.getElementById('de-pending-panel');
-    const close=document.getElementById('de-close');
-    const retry=document.getElementById('de-retry-all');
-    const clear=document.getElementById('de-clear-uploaded');
-
-    if(btnP && panel){ btnP.addEventListener('click', ()=>{ panel.style.display=(panel.style.display==='block'?'none':'block'); refreshPendingUI(); }); }
-    if(null){ null.addEventListener('click', exportAllPhotos); }
-    if(close && panel){ close.addEventListener('click', ()=> panel.style.display='none'); }
-    if(retry){ retry.addEventListener('click', processQueue); }
-    if(clear){ clear.addEventListener('click', clearUploaded); }
+  // Ενημέρωση λίστας όταν αλλάζει το state
+  const originalRenderGallery = window.renderGallery;
+  if (originalRenderGallery) {
+    window.renderGallery = function() {
+      originalRenderGallery();
+      refreshPendingList();
+    };
   }
 
-  document.addEventListener('DOMContentLoaded', ()=>{
-    hookFileInputs(); initFloatingUI(); refreshPendingUI(); processQueue();
-  });
-  new MutationObserver(hookFileInputs).observe(document.documentElement,{subtree:true,childList:true});
-  setInterval(processQueue, 10000);
-  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') processQueue(); });
+  // Αρχική ενημέρωση
+  refreshPendingList();
 })();
 </script>
 
@@ -1911,31 +1887,94 @@ body{padding-bottom:64px}
 <script>
 async function exportAllZip(){
   try{
+    console.log('Starting ZIP export...');
+    
+    // Χρησιμοποιούμε τα items από το state
     const items = (window.state && Array.isArray(window.state.items)) ? window.state.items : [];
-    if (!items.length){ alert('Δεν υπάρχουν αρχεία στη λίστα.'); return; }
-    if (!window.JSZip){ alert('JSZip δεν φορτώθηκε.'); return; }
+    
+    console.log('Items found:', items.length);
+    console.log('Items:', items);
+    
+    if (!items.length){ 
+      alert('Δεν υπάρχουν αρχεία στη λίστα. Πήγαινε πρώτα στην καρτέλα "Φωτογράφιση" για να προσθέσεις φωτογραφίες.'); 
+      return; 
+    }
+    
+    if (!window.JSZip){ 
+      // Fallback αν δεν φορτώσει το JSZip
+      alert('JSZip δεν φορτώθηκε. Δοκιμάστε ξανά ή ανανεώστε τη σελίδα.');
+      return; 
+    }
+    
     const zip = new JSZip();
-    let count = 0;
+    let addedCount = 0;
+    
+    // Προσθήκη όλων των αρχείων από τη συλλογή
     for (const it of items){
       try{
-        const name = (it && (it.name||it.fileName||('file_'+(++count))))+'';
-        const blob = it && (it.blob || it.file) || null;
-        if (blob && (blob instanceof Blob)){
-          zip.file(name, blob);
-        } else if (it && it.base64){
-          zip.file(name, it.base64.split(',').pop(), {base64:true});
+        if (!it || !it.file) {
+          console.log('Skipping item - no file:', it);
+          continue;
         }
-      }catch(e){ console.warn('Skip item in ZIP:', e); }
+        
+        // Χρησιμοποιούμε το όνομα από το state ή από το αρχείο
+        const name = it.name || it.file.name || `photo_${addedCount + 1}.jpg`;
+        const blob = it.file;
+        
+        console.log('Adding to ZIP:', name, 'size:', blob.size);
+        
+        if (blob instanceof Blob){
+          zip.file(name, blob);
+          addedCount++;
+        }
+      }catch(e){ 
+        console.warn('Skip item in ZIP:', e, it); 
+      }
     }
-    const content = await zip.generateAsync({type:'blob'});
-    const fileName = (window.state && window.state.job && window.state.job.srFolderName ? window.state.job.srFolderName : 'photos') + '_export.zip';
-    saveAs(content, fileName);
+    
+    console.log('Total files added to ZIP:', addedCount);
+    
+    if (addedCount === 0) {
+      alert('Δεν βρέθηκαν αρχεία για εξαγωγή. Βεβαιωθείτε ότι έχετε προσθέσει φωτογραφίες στη συλλογή.');
+      return;
+    }
+    
+    // Δημιουργία ZIP
+    const content = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
+    
+    const fileName = (window.state && window.state.job && window.state.job.srFolderName ? 
+                     window.state.job.srFolderName.replace(/[^a-zA-Z0-9]/g, '_') : 'photos') + 
+                     '_export_' + new Date().toISOString().slice(0,10) + '.zip';
+    
+    // Δημιουργία link για download
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    a.download = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    // Cleanup μετά από 30 δευτερόλεπτα
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+    }, 30000);
+    
+    console.log('ZIP export completed:', fileName);
+    
   }catch(err){
+    console.error('ZIP export error:', err);
     alert('Σφάλμα στο export ZIP: ' + (err && err.message || err));
   }
 }
-</script>
 
+// Βεβαιωθείτε ότι η συνάρτηση είναι διαθέσιμη globally
+window.exportAllZip = exportAllZip;
+</script>
 
 <script>
 (function(){
@@ -1980,13 +2019,45 @@ async function exportAllZip(){
     document.getElementById('tool-export-zip')?.addEventListener('click', ()=>{ if (typeof exportAllZip==='function') exportAllZip(); else alert('Λείπει exportAllZip'); });
     document.getElementById('sht-settings')?.addEventListener('click', openSettings);
     document.getElementById('sht-pending')?.addEventListener('click', togglePending);
-    document.getElementById('sht-zip')?.addEventListener('click', ()=>{ if (typeof exportAllZip==='function') exportAllZip(); else alert('Λείπει exportAllZip'); });
+    document.getElementById('sht-zip')?.addEventListener('click', function() {
+		if (typeof exportAllZip === 'function') {
+			exportAllZip();
+		} else {
+			alert('Η λειτουργία εξαγωγής δεν είναι διαθέσιμη. Ανανεώστε τη σελίδα.');
+		}
+	  });
     document.getElementById('sht-close')?.addEventListener('click', closeSheet);
     back?.addEventListener('click', closeSheet);
   }catch(e){ console.warn('tools init error', e); }
 })();
 </script>
+<script>
+// Debug function για έλεγχο state
+function debugState() {
+  console.log('=== DEBUG STATE ===');
+  console.log('State:', window.state);
+  console.log('Items:', window.state?.items);
+  console.log('Items count:', window.state?.items?.length);
+  if (window.state?.items) {
+    window.state.items.forEach((item, index) => {
+      console.log(`Item ${index}:`, item.name, item.file, item.status);
+    });
+  }
+  console.log('===================');
+}
 
+// Προσθήκη debug button (προσθήκη μόνο για testing)
+const debugBtn = document.createElement('button');
+debugBtn.textContent = '🐛 Debug';
+debugBtn.style.position = 'fixed';
+debugBtn.style.top = '10px';
+debugBtn.style.right = '10px';
+debugBtn.style.zIndex = '99999';
+debugBtn.style.padding = '5px';
+debugBtn.style.fontSize = '12px';
+debugBtn.onclick = debugState;
+document.body.appendChild(debugBtn);
+</script>
 
 <script>
 (function(){
@@ -2178,6 +2249,51 @@ async function exportAllZip(){
     }
   });
 })();
+</script>
+<script>
+// Προσθήκη preview στον συγχρονισμό
+function addPreviewToSync() {
+  const syncList = document.getElementById('syncList');
+  if (!syncList) return;
+  
+  // Χρησιμοποιούμε event delegation για δυναμικά προστεθέντα στοιχεία
+  syncList.addEventListener('click', function(e) {
+    // Ψάχνουμε για preview links
+    if (e.target.classList.contains('preview-link') || 
+        e.target.closest('.preview-link')) {
+      e.preventDefault();
+      const fileId = e.target.dataset.fileId || e.target.closest('.preview-link').dataset.fileId;
+      if (fileId) {
+        window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
+      }
+    }
+  });
+}
+
+// Ενημέρωση της refreshSync για preview
+const originalRefreshSync = window.refreshSync;
+if (originalRefreshSync) {
+  window.refreshSync = function() {
+    originalRefreshSync();
+    // Κάλεσε την preview function μετά από μικρή καθυστέρηση
+    setTimeout(addPreviewToSync, 100);
+  };
+}
+
+// Αρχική κλήση
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(addPreviewToSync, 500);
+});
+
+// Ενημέρωση και στον renderSyncList
+const originalRenderSyncList = window.renderSyncList;
+if (originalRenderSyncList) {
+  window.renderSyncList = function(srName, selector) {
+    const result = originalRenderSyncList(srName, selector);
+    setTimeout(addPreviewToSync, 100);
+    return result;
+  };
+}
 </script>
 </body>
 </html>
