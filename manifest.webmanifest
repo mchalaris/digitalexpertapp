@@ -1,20 +1,12 @@
 {
-  "name": "DIGITAL EXPERT — PHOTOS",
+  "name": "Digital Expert Photos",
   "short_name": "DE Photos",
-  "start_url": "/digitalexpertapp/",
+  "start_url": "./dephotos_v6_25_tools_tab_final.html",
   "display": "standalone",
-  "background_color": "#f6f7fb",
+  "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "icons": [
-    {
-      "src": "/digitalexpertapp/logo.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/digitalexpertapp/logo.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
+    { "src": "assets/logo.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/logo.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
