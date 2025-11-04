@@ -201,7 +201,99 @@ window.__ffmpegLoader = (function(){
 </script>
 
 </head>
+<script>
+// CORS Proxy Configuration
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://cors-anywhere.herokuapp.com/',
+  'https://corsproxy.io/?',
+  'https://proxy.cors.sh/'
+];
 
+let currentProxyIndex = 0;
+
+function getCorsProxyUrl(url) {
+  return CORS_PROXIES[currentProxyIndex] + encodeURIComponent(url);
+}
+
+function rotateProxy() {
+  currentProxyIndex = (currentProxyIndex + 1) % CORS_PROXIES.length;
+  console.log('Rotated to proxy:', CORS_PROXIES[currentProxyIndex]);
+}
+
+async function corsFetch(url, options = {}) {
+  const proxyUrl = getCorsProxyUrl(url);
+  
+  try {
+    const response = await fetch(proxyUrl, {
+      ...options,
+      headers: {
+        ...options.headers,
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    return response;
+  } catch (error) {
+    console.warn('Proxy failed, rotating...', error);
+    rotateProxy();
+    throw error;
+  }
+}
+
+// Override την υπάρχουσα fetch logic για search
+const originalRunSrSearch = window.runSrSearch;
+window.runSrSearch = async function() {
+  const q = srSearch.value.trim(); 
+  srMenu.innerHTML = ''; 
+  srMenu.classList.remove('show'); 
+  if(!q) return;
+  
+  try {
+    const targetUrl = WEBAPP_URL + '?action=search&query=' + encodeURIComponent(q) + '&t=' + Date.now();
+    const res = await corsFetch(targetUrl);
+    const json = await res.json(); 
+    
+    if(!json.ok) throw new Error(json.error||'search failed');
+    
+    const qn = upperNoTonos(q); 
+    let rows = json.results.filter(r => upperNoTonos(r.name).includes(qn));
+    
+    if(!rows.length){
+      srMenu.innerHTML = '<div class="option muted">Δεν βρέθηκαν</div>';
+      srMenu.classList.add('show');
+      return;
+    }
+    
+    rows.slice(0,60).forEach(r => {
+      const el = document.createElement('div'); 
+      el.className = 'option'; 
+      el.textContent = r.name;
+      el.onclick = () => {
+        const parts = r.name.split(' ');
+        const srGuess = parts[parts.length-1] || r.name;
+        state.job = {
+          sr: srGuess,
+          building: 'BXXXX',
+          address: r.name.replace(srGuess,'').trim() || '-',
+          srFolderName: r.name
+        };
+        srInfo.textContent = 'Επιλέχθηκε: ' + r.name; 
+        srMenu.classList.remove('show'); 
+        srSearch.value = r.name;
+      };
+      srMenu.appendChild(el);
+    }); 
+    srMenu.classList.add('show');
+  } catch(err) {
+    console.error('Search error:', err);
+    srMenu.innerHTML = '<div class="option muted">Σφάλμα αναζήτησης: ' + ((err&&err.message)||'άγνωστο') + '</div>'; 
+    srMenu.classList.add('show');
+  }
+};
+</script>
 <body>
 
 <!-- Sticky header -->
@@ -586,24 +678,61 @@ srSearch.addEventListener('input',()=>{clearTimeout(tSearch);tSearch=setTimeout(
 btnSrSearch.addEventListener('click',runSrSearch);
 document.addEventListener('click',e=>{if(!srMenu.contains(e.target)&&e.target!==srSearch){srMenu.classList.remove('show')}});
 
+<script>
 async function runSrSearch(){
-  const q=srSearch.value.trim(); srMenu.innerHTML=''; srMenu.classList.remove('show'); if(!q) return;
+  const q = srSearch.value.trim(); 
+  srMenu.innerHTML = ''; 
+  srMenu.classList.remove('show'); 
+  if(!q) return;
+  
   try{
-    const res=await fetch(WEBAPP_URL+'?action=search&query='+encodeURIComponent(q)+'&t='+Date.now());
-    const json=await res.json(); if(!json.ok) throw new Error(json.error||'search failed');
-    const qn=upperNoTonos(q); let rows=json.results.filter(r=>upperNoTonos(r.name).includes(qn));
-    if(!rows.length){srMenu.innerHTML='<div class="option muted">Δεν βρέθηκαν</div>';srMenu.classList.add('show');return;}
-    rows.slice(0,60).forEach(r=>{
-      const el=document.createElement('div'); el.className='option'; el.textContent=r.name;
-      el.onclick=()=>{const parts=r.name.split(' ');const srGuess=parts[parts.length-1]||r.name;
-        state.job={sr:srGuess,building:'BXXXX',address:r.name.replace(srGuess,'').trim()||'-',srFolderName:r.name};
-        srInfo.textContent='Επιλέχθηκε: '+r.name; srMenu.classList.remove('show'); srSearch.value=r.name;};
+    // Χρησιμοποίησε απευθείας fetch με CORS proxy
+    const proxyUrl = 'https://api.allorigins.win/raw?url=' + 
+      encodeURIComponent(WEBAPP_URL + '?action=search&query=' + encodeURIComponent(q) + '&t=' + Date.now());
+    
+    const res = await fetch(proxyUrl);
+    
+    if (!res.ok) throw new Error('Network response was not ok');
+    
+    const json = await res.json(); 
+    if(!json.ok) throw new Error(json.error||'search failed');
+    
+    const qn = upperNoTonos(q); 
+    let rows = json.results.filter(r => upperNoTonos(r.name).includes(qn));
+    
+    if(!rows.length){
+      srMenu.innerHTML = '<div class="option muted">Δεν βρέθηκαν</div>';
+      srMenu.classList.add('show');
+      return;
+    }
+    
+    rows.slice(0,60).forEach(r => {
+      const el = document.createElement('div'); 
+      el.className = 'option'; 
+      el.textContent = r.name;
+      el.onclick = () => {
+        const parts = r.name.split(' ');
+        const srGuess = parts[parts.length-1] || r.name;
+        state.job = {
+          sr: srGuess,
+          building: 'BXXXX',
+          address: r.name.replace(srGuess,'').trim() || '-',
+          srFolderName: r.name
+        };
+        srInfo.textContent = 'Επιλέχθηκε: ' + r.name; 
+        srMenu.classList.remove('show'); 
+        srSearch.value = r.name;
+      };
       srMenu.appendChild(el);
-    }); srMenu.classList.add('show');
-  } catch(err){
-    srMenu.innerHTML='<div class="option muted">Σφάλμα αναζήτησης: '+((err&&err.message)||'άγνωστο')+'</div>'; srMenu.classList.add('show');
+    }); 
+    srMenu.classList.add('show');
+  } catch(err) {
+    console.error('Search error:', err);
+    srMenu.innerHTML = '<div class="option muted">Σφάλμα αναζήτησης: ' + ((err&&err.message)||'άγνωστο') + '</div>'; 
+    srMenu.classList.add('show');
   }
 }
+</script>
 btnSRApply.onclick=()=>{const addr=inAddress.value.trim(), sr=inSR.value.trim(); if(!sr){alert('Γράψε SR');return;}
   const name=(addr?addr+' ':'')+sr; state.job={sr:sr,building:'BXXXX',address:addr||'-',srFolderName:name}; srInfo.textContent='Επιλέχθηκε: '+name;};
 
