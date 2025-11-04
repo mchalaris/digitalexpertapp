@@ -89,7 +89,69 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-ap
 .badge.toggle{display:inline-block;padding:6px 10px;border:1px solid #ddd;border-radius:12px;cursor:pointer;font-weight:700}
 .badge.toggle.active{background:#111;color:#fff;border-color:#111}
 </style>
+<script>
+// Configuration για GitHub Pages
+const CONFIG = {
+  GITHUB_PAGES: true,
+  BASE_PATH: '/digitalexpertapp/',
+  WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbx_pJ-CByq6aFZ2d9v12OglYA51FSI8gTPSRtFIPQgMxJOgJvWNcxJanllsT9wO1tZN/exec',
+  CORS_PROXY: 'https://cors-anywhere.herokuapp.com/',
+  USE_JSONP: true
+};
 
+// Resource URL helper
+function getResourceUrl(path) {
+  return CONFIG.GITHUB_PAGES ? (CONFIG.BASE_PATH + path) : path;
+}
+
+// Enhanced fetch για GitHub Pages
+function githubSafeFetch(url, options = {}) {
+  // Αν είναι Google Apps Script URL και είμαστε σε GitHub Pages
+  if (url.includes('script.google.com') && CONFIG.GITHUB_PAGES) {
+    if (CONFIG.USE_JSONP && (!options.method || options.method === 'GET')) {
+      return jsonpFetch(url);
+    } else {
+      // Χρησιμοποίησε CORS proxy για POST requests
+      const proxyUrl = CONFIG.CORS_PROXY + url;
+      return fetch(proxyUrl, {
+        ...options,
+        headers: {
+          ...options.headers,
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      });
+    }
+  }
+  
+  // Κανονικό fetch για άλλα URLs
+  return fetch(url, options);
+}
+
+// Ενημέρωση όλων των fetch calls στο app
+function patchFetchCalls() {
+  // Πατέντα: Αντικατάσταση όλων των fetch() με githubSafeFetch()
+  const originalFetch = window.fetch;
+  window.fetch = function(url, options) {
+    return githubSafeFetch(url, options);
+  };
+}
+
+// Αρχικοποίηση όταν φορτωθεί το DOM
+document.addEventListener('DOMContentLoaded', function() {
+  patchFetchCalls();
+  initCORSFixes();
+  
+  // Ενημέρωση logo path
+  const logoImg = document.getElementById('logoImg');
+  if (logoImg && CONFIG.GITHUB_PAGES) {
+    logoImg.src = getResourceUrl('logo.png');
+    logoImg.onerror = function() {
+      this.style.display = 'none';
+      document.getElementById('logoFallback').style.display = 'block';
+    };
+  }
+});
+</script>
 <script>
 /* Polyfill: Promise.finally για παλιότερα webviews/browsers */
 if (!Promise.prototype.finally) {
